@@ -382,8 +382,8 @@ def test_music_cache_not_evicted_by_video_torrents():
     saved = {}
     save_cache = Mock(side_effect=lambda data, filename: saved.__setitem__(filename, copy.deepcopy(data)))
     fake_settings = Mock()
-    # 公共参数：缓存上限 2，刷新配额 5，音乐与影视各自独立计算
-    fake_settings.CONF = SimpleNamespace(torrents=2, refresh=5)
+    # 公共参数：缓存上限 2，刷新配额 5，音乐与影视各自独立计算；线程池按站点数取最小值
+    fake_settings.CONF = SimpleNamespace(torrents=2, refresh=5, threadpool=0)
     fake_settings.NO_CACHE_SITE_KEY = "no-cache-site.invalid"
 
     with (

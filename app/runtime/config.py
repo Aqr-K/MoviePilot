@@ -145,6 +145,11 @@ class ConfigModel(BaseModel):
     DB_TIMEOUT: int = 60
     # 是否启用 WAL 模式，仅适用于SQLite，默认开启
     DB_WAL_ENABLE: bool = True
+    # SQLite 的 synchronous 级别，仅适用于 SQLite：OFF/NORMAL/FULL/EXTRA。
+    # 默认 NORMAL——WAL 模式下的标准组合，commit 不再逐次 fsync，只在 checkpoint
+    # 时批量落盘；断电或系统崩溃时可能丢失最近若干次已提交事务，但不会损坏数据库
+    # 文件。FULL 才保证每次 commit 后立即持久化，代价是每次 commit 都有一次 fsync
+    DB_SYNCHRONOUS: str = "NORMAL"
     # 数据库连接池类型，QueuePool, NullPool
     DB_POOL_TYPE: str = "QueuePool"
     # 是否在获取连接时进行预先 ping 操作

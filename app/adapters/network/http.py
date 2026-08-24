@@ -14,6 +14,7 @@ import httpx
 import requests
 import urllib3
 from requests import Response, Session
+from requests.adapters import BaseAdapter, HTTPAdapter
 from urllib3.exceptions import InsecureRequestWarning
 from urllib.parse import unquote, quote
 
@@ -218,9 +219,10 @@ def _get_shared_async_transport(
 
 async def aclose_shared_async_transports() -> None:
     """
-    关闭当前事件循环下所有共享 AsyncHTTPTransport，释放底层连接池。
+    关闭当前事件循环下所有共享 AsyncHTTPTransport，并一并释放共享同步 HTTPAdapter。
     建议在应用关闭流程（如 FastAPI shutdown 事件）中调用，避免 ResourceWarning。
     """
+    _close_shared_sync_adapters()
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -248,6 +250,157 @@ async def aclose_shared_async_transports() -> None:
     )
     with _shared_async_transports_lock:
         _pending_eviction_tasks.difference_update(pending_evictions)
+
+
+class _NonClosingAdapterProxy(BaseAdapter):
+    """
+    包装共享 HTTPAdapter，转发请求但吞掉 close 调用。
+    防止 per-call Session 关闭时把进程级共享的连接池一并清空。
+    共享适配器的真正关闭由 _close_shared_sync_adapters() 统一管理。
+    """
+
+    def __init__(self, wrapped: HTTPAdapter):
+        """保存由进程统一管理生命周期的底层适配器。"""
+        super().__init__()
+        self._wrapped = wrapped
+
+    def send(self, request, **kwargs):
+        """将同步请求转发给共享适配器。"""
+        return self._wrapped.send(request, **kwargs)
+
+    def close(self) -> None:
+        """忽略局部关闭请求，保留共享连接池。"""
+        return None
+
+
+_SharedSyncAdapterKey = Tuple[Optional[Tuple[Tuple[str, str], ...]], int, int]
+
+# 共享同步 HTTPAdapter 桶，按代理配置与连接池上限区分，支持 LRU 淘汰
+_shared_sync_adapters: collections.OrderedDict[_SharedSyncAdapterKey, HTTPAdapter] = collections.OrderedDict()
+# 多线程首次并发取用同一配置时，需要互斥保护以保证只创建一个适配器
+_shared_sync_adapters_lock = threading.Lock()
+# 允许同时存在的共享适配器桶数；超出后按 LRU 淘汰最久未用桶
+_MAX_SHARED_SYNC_ADAPTERS = 32
+# 单个共享适配器缓存的 (scheme, host, port, TLS 参数) 连接池数量上限
+_DEFAULT_SYNC_POOL_CONNECTIONS = 32
+# 与共享连接池失效 keep-alive 无关、重试同样会失败的连接类异常
+_NON_STALE_CONNECTION_ERRORS = (
+    requests.exceptions.ProxyError,
+    requests.exceptions.SSLError,
+    requests.exceptions.ConnectTimeout,
+)
+
+
+def _sync_proxies_signature(proxies: Any) -> Optional[Tuple[Tuple[str, str], ...]]:
+    """
+    把代理配置规范化为可哈希签名，用于区分共享连接池。
+
+    :param proxies: requests 格式的代理配置，可为字典、字符串或 None
+    :return: 排序后的键值对元组；无有效代理时返回 None
+    """
+    if not proxies:
+        return None
+    if isinstance(proxies, str):
+        normalized = proxies.strip()
+        return (("all", normalized),) if normalized else None
+    if isinstance(proxies, dict):
+        items = tuple(
+            sorted(
+                (str(key), str(value).strip())
+                for key, value in proxies.items()
+                if isinstance(value, str) and value.strip()
+            )
+        )
+        return items or None
+    return None
+
+
+def _get_shared_sync_adapter(
+    proxies: Any,
+    pool_connections: int = _DEFAULT_SYNC_POOL_CONNECTIONS,
+    pool_maxsize: int = _DEFAULT_MAX_CONNECTIONS,
+) -> HTTPAdapter:
+    """
+    返回与给定代理配置绑定的共享 HTTPAdapter（底层连接池），首次按需创建。
+
+    适配器只持有 urllib3 连接池与代理管理器，两者均为线程安全；
+    cookies/headers/重定向等会话级状态由调用方在外层 Session 单独持有，
+    每次请求用完即销毁，因此天然无 jar 累积串扰。
+
+    :param proxies: 本次请求生效的代理配置
+    :param pool_connections: 缓存的连接池数量上限
+    :param pool_maxsize: 单个连接池保留的最大连接数
+    :return: 共享 HTTPAdapter 实例
+    """
+    key: _SharedSyncAdapterKey = (
+        _sync_proxies_signature(proxies),
+        pool_connections,
+        pool_maxsize,
+    )
+    evicted = []
+    with _shared_sync_adapters_lock:
+        adapter = _shared_sync_adapters.get(key)
+        if adapter is not None:
+            _shared_sync_adapters.move_to_end(key)  # LRU 触摸
+            return adapter
+        adapter = HTTPAdapter(
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+        )
+        _shared_sync_adapters[key] = adapter
+        while len(_shared_sync_adapters) > _MAX_SHARED_SYNC_ADAPTERS:
+            evicted.append(_shared_sync_adapters.popitem(last=False)[1])
+
+    for evicted_adapter in evicted:
+        try:
+            evicted_adapter.close()
+        except Exception:  # pragma: no cover - 防御性
+            pass
+    return adapter
+
+
+def _close_shared_sync_adapters() -> None:
+    """
+    关闭全部共享同步 HTTPAdapter，释放其底层连接池与代理管理器。
+    """
+    with _shared_sync_adapters_lock:
+        adapters = list(_shared_sync_adapters.values())
+        _shared_sync_adapters.clear()
+    for adapter in adapters:
+        try:
+            adapter.close()
+        except Exception:  # pragma: no cover - 防御性
+            pass
+
+
+def _build_pooled_session(proxies: Any) -> Session:
+    """
+    构造一次性会话：连接池取自共享适配器，cookie jar 随会话销毁不跨请求累积。
+
+    :param proxies: 本次请求生效的代理配置
+    :return: 已挂载共享适配器的 requests.Session
+    """
+    adapter = _NonClosingAdapterProxy(_get_shared_sync_adapter(proxies))
+    session = Session()
+    session.adapters.clear()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def _is_stale_pool_error(error: Exception) -> bool:
+    """
+    判断异常是否为复用了对端已关闭的 keep-alive 连接的特征。
+
+    :param error: requests 抛出的请求异常
+    :return: 命中失效连接特征返回 True
+    """
+    if isinstance(error, _NON_STALE_CONNECTION_ERRORS):
+        return False
+    return isinstance(
+        error,
+        (requests.exceptions.ConnectionError, requests.exceptions.ChunkedEncodingError),
+    )
 
 
 def _url_decode_if_latin(original: str) -> str:
@@ -414,31 +567,85 @@ class RequestUtils:
         :return: HTTP响应对象
         :raises: requests.exceptions.RequestException 仅raise_exception为True时会抛出
         """
-        if self._session is None:
-            req_method = requests.request
-        else:
-            req_method = self._session.request
         kwargs.setdefault("headers", self._headers)
         kwargs.setdefault("cookies", self._cookies)
         kwargs.setdefault("proxies", self._proxies)
         kwargs.setdefault("timeout", self._timeout)
         kwargs.setdefault("verify", False)
         kwargs.setdefault("stream", False)
-        method_upper = method.upper()
+        is_idempotent = method.upper() in _REQUESTS_RETRY_IDEMPOTENT_METHODS
+        if self._session is None:
+            return self._request_pooled(
+                method, url, is_idempotent, raise_exception, **kwargs
+            )
+        return self._request_with_session(
+            method, url, is_idempotent, raise_exception, **kwargs
+        )
+
+    def _request_pooled(
+        self,
+        method: str,
+        url: str,
+        is_idempotent: bool,
+        raise_exception: bool,
+        **kwargs,
+    ) -> Optional[Response]:
+        """
+        通过共享连接池发起请求，省去每次请求重建 TCP 与 TLS 握手的开销
+        :param method: HTTP方法
+        :param url: 请求的URL
+        :param is_idempotent: 是否为幂等方法，决定失效连接时是否重试
+        :param raise_exception: 是否在发生异常时抛出异常，否则默认拦截异常返回None
+        :param kwargs: 其他请求参数，如headers, cookies, proxies等
+        :return: HTTP响应对象，失败且不抛异常时返回None
+        :raises: requests.exceptions.RequestException 仅raise_exception为True时会抛出
+        """
+        session = _build_pooled_session(kwargs.get("proxies"))
         try:
-            return req_method(method, url, **kwargs)
+            return session.request(method, url, **kwargs)
+        except requests.exceptions.RequestException as e:
+            # 共享连接池可能取到对端已关闭的 keep-alive 连接，此时请求通常未到服务端；
+            # 失败的连接已被 urllib3 丢弃，幂等方法重试一次即可换到新建连接
+            if is_idempotent and _is_stale_pool_error(e):
+                try:
+                    return session.request(method, url, **kwargs)
+                except requests.exceptions.RequestException:
+                    if raise_exception:
+                        raise
+                    return None
+            if raise_exception:
+                raise
+            return None
+
+    def _request_with_session(
+        self,
+        method: str,
+        url: str,
+        is_idempotent: bool,
+        raise_exception: bool,
+        **kwargs,
+    ) -> Optional[Response]:
+        """
+        通过调用方自管的 session 发起请求，连接池与 cookie jar 均由调用方持有
+        :param method: HTTP方法
+        :param url: 请求的URL
+        :param is_idempotent: 是否为幂等方法，决定连接异常时是否重试
+        :param raise_exception: 是否在发生异常时抛出异常，否则默认拦截异常返回None
+        :param kwargs: 其他请求参数，如headers, cookies, proxies等
+        :return: HTTP响应对象，失败且不抛异常时返回None
+        :raises: requests.exceptions.RequestException 仅raise_exception为True时会抛出
+        """
+        try:
+            return self._session.request(method, url, **kwargs)
         except (
             requests.exceptions.ConnectionError,
             requests.exceptions.ChunkedEncodingError,
             requests.exceptions.ReadTimeout,
-        ) as e:
-            if (
-                self._session is not None
-                and method_upper in _REQUESTS_RETRY_IDEMPOTENT_METHODS
-            ):
+        ):
+            if is_idempotent:
                 try:
                     self._session.close()
-                    return req_method(method, url, **kwargs)
+                    return self._session.request(method, url, **kwargs)
                 except requests.exceptions.RequestException:
                     if raise_exception:
                         raise

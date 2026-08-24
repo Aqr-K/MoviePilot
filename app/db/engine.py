@@ -7,7 +7,7 @@
 import threading
 from typing import Dict, Optional, cast
 
-from sqlalchemy import NullPool, QueuePool, create_engine, text
+from sqlalchemy import NullPool, QueuePool, create_engine, event, text
 from sqlalchemy.engine import Engine as SyncEngine
 from sqlalchemy.ext.asyncio import AsyncEngine as SaAsyncEngine, create_async_engine
 
@@ -50,19 +50,67 @@ def _get_database_engine(is_async: bool = False, pooled: bool = False):
 
 def _sqlite_connect_args() -> dict:
     """
-    SQLite 连接参数：驱动超时、部署侧注入的驱动级参数，以及 WAL 模式下需要放开的
-    跨线程限制。
+    SQLite 连接参数：驱动超时、跨线程复用限制、部署侧注入的驱动级参数。
+
+    check_same_thread 与 journal 模式（WAL/DELETE）是正交的两件事：前者是 sqlite3
+    驱动的线程校验，后者是日志模式。连接池（QueuePool 与 NullPool 皆然）会把同一条
+    物理连接在不同线程间复用，因此该参数必须始终为 False，不能只在启用 WAL 时才设置
+    ——否则关闭 WAL 后连接跨线程传递会被驱动的线程校验直接拒绝。
     :return: 传给 create_engine / create_async_engine 的 connect_args
     """
     _connect_args = {
         "timeout": settings.DB_TIMEOUT,
+        "check_same_thread": False,
     }
-    # 允许部署侧注入驱动级参数（如 PgBouncer 事务模式下的 statement_cache_size）
+    # 允许部署侧注入驱动级参数（如 PgBouncer 事务模式下的 statement_cache_size），
+    # 放在默认值之后合并，保留显式覆盖上面任意默认值的能力
     _connect_args.update(settings.DB_CONNECT_ARGS or {})
-    # 启用 WAL 模式时的额外配置
-    if settings.DB_WAL_ENABLE:
-        _connect_args["check_same_thread"] = False
     return _connect_args
+
+
+# PRAGMA synchronous 合法取值，对应 sqlite3 驱动接受的字符串（大小写不敏感）
+_SQLITE_SYNCHRONOUS_LEVELS = ("OFF", "NORMAL", "FULL", "EXTRA")
+
+
+def _resolve_sqlite_synchronous() -> str:
+    """
+    校验 DB_SYNCHRONOUS 配置值，非法时回退为 NORMAL 并记录告警。
+    :return: OFF/NORMAL/FULL/EXTRA 之一
+    """
+    _value = str(settings.DB_SYNCHRONOUS or "").strip().upper()
+    if _value in _SQLITE_SYNCHRONOUS_LEVELS:
+        return _value
+    logger.warn(
+        f"DB_SYNCHRONOUS 配置值 '{settings.DB_SYNCHRONOUS}' 不合法，回退为 NORMAL；"
+        f"合法取值为 {', '.join(_SQLITE_SYNCHRONOUS_LEVELS)}"
+    )
+    return "NORMAL"
+
+
+def _set_sqlite_synchronous_on_connect(dbapi_connection, _connection_record) -> None:
+    """
+    SQLite connect 事件回调：设置 synchronous 级别。
+
+    synchronous 是连接级会话状态，不随库文件持久化——sqlite3 驱动每建立一条新的
+    物理连接都会重置为默认的 FULL，因此必须挂在 connect 事件上逐连接设置，不能像
+    journal_mode 那样在引擎构建时设一次；journal_mode 是持久化在库文件头部的属性，
+    设一次即对后续所有连接生效，二者语义不同不能套用同一种设置方式。
+    :param dbapi_connection: 驱动原生连接对象（sqlite3.Connection）
+    :param _connection_record: 连接池记录，未使用
+    """
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(f"PRAGMA synchronous={_resolve_sqlite_synchronous()}")
+    finally:
+        cursor.close()
+
+
+def _register_sqlite_synchronous_pragma(engine: SyncEngine) -> None:
+    """
+    为 SQLite 同步引擎注册 synchronous 的 connect 事件监听。
+    :param engine: 同步引擎；异步引擎需传入其 sync_engine 属性
+    """
+    event.listen(engine, "connect", _set_sqlite_synchronous_on_connect)
 
 
 def build_sqlite_engine(url: str) -> SyncEngine:
@@ -98,6 +146,7 @@ def build_sqlite_engine(url: str) -> SyncEngine:
     # 创建数据库引擎
     engine = create_engine(**_db_kwargs)
     _register_database_error_logging(engine)
+    _register_sqlite_synchronous_pragma(engine)
 
     # 设置WAL模式。
     # 这是引擎构建里唯一的阻塞 I/O。调用方若在创建锁内构建引擎（如 get_engine()
@@ -131,6 +180,10 @@ def _get_sqlite_engine(is_async: bool = False, pooled: bool = False):
         # 创建异步数据库引擎
         async_engine = create_async_engine(**_db_kwargs)
         _register_database_error_logging(async_engine.sync_engine)
+        # synchronous 是连接级会话状态，不会因为同步引擎设置过就对异步侧生效，
+        # 必须在异步引擎自己的 sync_engine 上单独挂 connect 事件——aiosqlite 的每条
+        # 物理连接都是经由这个底层 sync engine 建立的
+        _register_sqlite_synchronous_pragma(async_engine.sync_engine)
 
         # 异步侧不再设置 WAL。journal_mode 是数据库文件级的持久属性，同步引擎已经设置过，
         # 这里重复设置本就是冗余的；而它原本用 asyncio.run() 完成，是异步引擎构建里唯一的

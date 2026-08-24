@@ -1,6 +1,7 @@
 import copy
 import re
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, List, Union, Optional
 
 from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
@@ -540,16 +541,6 @@ class TorrentsChain(ChainBase):
         :param progress_callback: 资源刷新进度更新回调
         :param include_music: 是否额外抓取站点的音乐专用浏览入口，服务音乐订阅
         """
-
-        def __is_no_cache_site(_domain: str) -> bool:
-            """
-            判断站点是否不需要缓存
-            """
-            for url_key in settings.NO_CACHE_SITE_KEY.split(','):
-                if url_key in _domain:
-                    return True
-            return False
-
         # 刷新类型
         if not stype:
             stype = settings.SUBSCRIBE_MODE
@@ -587,152 +578,56 @@ class TorrentsChain(ChainBase):
                 text=f"开始刷新站点资源，共 {total_indexers} 个站点 ...",
                 data={"total": total_indexers, "finished": 0},
             )
-        # 遍历站点缓存资源
-        for index, indexer in enumerate(indexers, start=1):
-            if global_vars.is_system_stopped:
-                break
-            if progress_callback:
-                progress_callback(
-                    value=(index - 1) / total_indexers * 100 if total_indexers else 100,
-                    text=(
-                        f"正在刷新站点资源（{index}/{total_indexers}）"
-                        f"{indexer.get('name')} ..."
-                    ),
-                    data={
-                        "total": total_indexers,
-                        "finished": index - 1,
-                        "current": indexer.get("id"),
-                    },
+        # 站点抓取并发执行，缓存合并按站点顺序在主线程串行完成
+        site_domains = [site_rules.extract_domain(indexer.get("domain")) for indexer in indexers]
+        max_workers = min(total_indexers, settings.CONF.threadpool or total_indexers) or 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            fetch_tasks = [
+                executor.submit(
+                    self._fetch_site_torrents,
+                    indexer=indexer,
+                    domain=domain,
+                    stype=stype,
+                    include_music=include_music,
                 )
-            domain = site_rules.extract_domain(indexer.get("domain"))
-            domains.append(domain)
-            if stype == "spider":
-                # 刷新首页种子
-                torrents: List[TorrentInfo] = []
-                # 读取第0页和第1页
-                for page in range(2):
-                    page_torrents = self.browse(domain=domain, page=page)
-                    if page_torrents:
-                        torrents.extend(page_torrents)
-                    else:
-                        # 如果某一页没有数据，说明已经到最后一页，停止获取
+                for indexer, domain in zip(indexers, site_domains)
+            ]
+            try:
+                for index, (indexer, domain, task) in enumerate(
+                        zip(indexers, site_domains, fetch_tasks), start=1):
+                    if global_vars.is_system_stopped:
                         break
-                # 存在音乐订阅时，默认首页可能不包含音乐资源，需要额外抓取音乐专用入口
-                if include_music and self._music_browse_paths(indexer):
-                    torrents = self.__append_music_browse_torrents(
-                        domain=domain, torrents=torrents
-                    )
-            else:
-                # 刷新RSS种子
-                torrents: List[TorrentInfo] = self.rss(domain=domain)
-                # 混合站点的 RSS 通常不提供媒体分类；有音乐订阅时补抓专用入口，
-                # 后续仍按与 spider 相同的独立缓存和去重规则处理。
-                if include_music and self._music_browse_paths(indexer):
-                    torrents = self.__append_music_browse_torrents(
-                        domain=domain, torrents=torrents
-                    )
-            # 按pubdate降序排列
-            torrents.sort(key=lambda x: x.pubdate or '', reverse=True)
-            # 音乐与影视按同一公共参数独立计算刷新配额，并分别写入各自缓存，音乐不会被影视资源挤出
-            music_torrents = [
-                t for t in torrents if t.category == MediaType.MUSIC.value
-            ][:settings.CONF.refresh]
-            torrents = [
-                t for t in torrents if t.category != MediaType.MUSIC.value
-            ][:settings.CONF.refresh]
-            if torrents or music_torrents:
-                if __is_no_cache_site(domain):
-                    # 不需要缓存的站点，直接处理
-                    logger.info(f'{indexer.get("name")} 有 {len(torrents) + len(music_torrents)} 个种子 (不缓存)')
-                    torrents_cache[domain] = []
-                    music_cache[domain] = []
-                else:
-                    # 过滤出没有处理过的种子 - 优化：使用集合查找，避免重复创建字符串列表
-                    cached_signatures = {f'{t.torrent_info.title}{t.torrent_info.description}'
-                                         for t in torrents_cache.get(domain) or []}
-                    torrents = [torrent for torrent in torrents
-                                if f'{torrent.title}{torrent.description}' not in cached_signatures]
-                    # 音乐种子对照音乐独立缓存去重
-                    music_signatures = {f'{t.torrent_info.title}{t.torrent_info.description}'
-                                        for t in music_cache.get(domain) or []}
-                    music_torrents = [torrent for torrent in music_torrents
-                                      if f'{torrent.title}{torrent.description}' not in music_signatures]
-                if torrents or music_torrents:
-                    logger.info(f'{indexer.get("name")} 有 {len(torrents) + len(music_torrents)} 个新种子')
-                else:
-                    logger.info(f'{indexer.get("name")} 没有新种子')
-                    continue
-                try:
-                    for torrent in torrents + music_torrents:
-                        if global_vars.is_system_stopped:
-                            break
-                        if not torrent.enclosure:
-                            logger.warn(f"缺少种子链接，忽略处理: {torrent.title}")
-                            continue
-                        logger.info(f'处理资源：{torrent.title} ...')
-                        if torrent.category == MediaType.MUSIC.value:
-                            meta = MetaMusic.parse_query(torrent.title)
-                            mediainfo = MusicInfo(
-                                title=meta.title,
-                                artists=list(meta.artists),
-                                album=meta.album,
-                                year=meta.year,
-                                names=[meta.title] if meta.title else [],
-                            )
-                            candidate_recognized = False
-                            match_source = "unknown"
-                        else:
-                            meta = MetaInfo(title=torrent.title, subtitle=torrent.description)
-                            if torrent.title != meta.org_string:
-                                logger.info(f'种子名称应用识别词后发生改变：{torrent.title} => {meta.org_string}')
-                            # 使用站点种子分类，校正类型识别
-                            if meta.type != MediaType.TV \
-                                    and torrent.category == MediaType.TV.value:
-                                meta.type = MediaType.TV
-                            mediainfo = MediaChain().recognize_by_meta(
-                                meta,
-                                obtain_images=False,
-                            )
-                            if not mediainfo:
-                                logger.warn(f'{torrent.title} 未识别到媒体信息')
-                                mediainfo = MediaInfo()
-                            mediainfo.clear()
-                            candidate_recognized = bool(
-                                mediainfo and all(resolve_media_identity(media=mediainfo))
-                            )
-                            match_source = self._get_media_id_match_source(mediainfo)
-                        # 上下文
-                        context = Context(
-                            meta_info=meta,
-                            media_info=mediainfo,
-                            torrent_info=torrent,
-                            resource_source="spider" if stype == "spider" else "rss",
-                            match_source=match_source if candidate_recognized else "unknown",
-                            candidate_recognized=candidate_recognized,
-                            media_info_is_target=False,
+                    if progress_callback:
+                        progress_callback(
+                            value=(index - 1) / total_indexers * 100 if total_indexers else 100,
+                            text=(
+                                f"正在刷新站点资源（{index}/{total_indexers}）"
+                                f"{indexer.get('name')} ..."
+                            ),
+                            data={
+                                "total": total_indexers,
+                                "finished": index - 1,
+                                "current": indexer.get("id"),
+                            },
                         )
-                        # 如果未识别到媒体信息，设置初始失败次数为1
-                        if not mediainfo or not all(resolve_media_identity(media=mediainfo)):
-                            context.media_recognize_fail_count = 1
-                        # 添加到缓存：音乐进入独立缓存，与影视分开存储
-                        if torrent.category == MediaType.MUSIC.value:
-                            target_cache = music_cache
-                        else:
-                            target_cache = torrents_cache
-                        if not target_cache.get(domain):
-                            target_cache[domain] = [context]
-                        else:
-                            target_cache[domain].append(context)
-                        # 如果超过了限制条数则移除掉前面的，音乐与影视各自独立计算配额
-                        if len(target_cache[domain]) > settings.CONF.torrents:
-                            target_cache[domain] = target_cache[domain][-settings.CONF.torrents:]
-                finally:
-                    torrents.clear()
-                    music_torrents.clear()
-                    del torrents
-                    del music_torrents
-            else:
-                logger.info(f'{indexer.get("name")} 没有获取到种子')
+                    domains.append(domain)
+                    # 单站点抓取或缓存合并失败只丢弃该站点，不影响其余站点的刷新结果
+                    try:
+                        self._cache_site_torrents(
+                            indexer=indexer,
+                            domain=domain,
+                            stype=stype,
+                            torrents=task.result() or [],
+                            torrents_cache=torrents_cache,
+                            music_cache=music_cache,
+                        )
+                    except Exception as err:
+                        logger.error(
+                            f'{indexer.get("name")} 刷新站点资源失败：{str(err)} - {traceback.format_exc()}'
+                        )
+            finally:
+                for task in fetch_tasks:
+                    task.cancel()
 
         # 保存缓存到本地，影视与音乐分别存储
         if stype == "spider":
@@ -761,6 +656,169 @@ class TorrentsChain(ChainBase):
                 torrents_cache.setdefault(_domain, []).extend(_contexts)
 
         return torrents_cache
+
+    @staticmethod
+    def _is_no_cache_site(domain: str) -> bool:
+        """
+        判断站点是否不需要缓存
+        :param domain: 站点域名
+        :return: 站点命中免缓存关键字时返回True
+        """
+        for url_key in settings.NO_CACHE_SITE_KEY.split(','):
+            if url_key in domain:
+                return True
+        return False
+
+    def _fetch_site_torrents(self, indexer: dict, domain: str, stype: str,
+                             include_music: bool) -> List[TorrentInfo]:
+        """
+        抓取单个站点的最新种子，同一站点内的分页与音乐入口请求按顺序发起
+        :param indexer: 站点索引配置
+        :param domain: 站点域名
+        :param stype: 刷新类型，spider:爬虫，rss:rss
+        :param include_music: 是否额外抓取站点的音乐专用浏览入口
+        :return: 站点最新种子列表
+        """
+        if stype == "spider":
+            # 刷新首页种子
+            torrents: List[TorrentInfo] = []
+            # 读取第0页和第1页
+            for page in range(2):
+                page_torrents = self.browse(domain=domain, page=page)
+                if page_torrents:
+                    torrents.extend(page_torrents)
+                else:
+                    # 如果某一页没有数据，说明已经到最后一页，停止获取
+                    break
+            # 存在音乐订阅时，默认首页可能不包含音乐资源，需要额外抓取音乐专用入口
+            if include_music and self._music_browse_paths(indexer):
+                torrents = self.__append_music_browse_torrents(
+                    domain=domain, torrents=torrents
+                )
+        else:
+            # 刷新RSS种子
+            torrents: List[TorrentInfo] = self.rss(domain=domain)
+            # 混合站点的 RSS 通常不提供媒体分类；有音乐订阅时补抓专用入口，
+            # 后续仍按与 spider 相同的独立缓存和去重规则处理。
+            if include_music and self._music_browse_paths(indexer):
+                torrents = self.__append_music_browse_torrents(
+                    domain=domain, torrents=torrents
+                )
+        return torrents
+
+    def _cache_site_torrents(self, indexer: dict, domain: str, stype: str,
+                             torrents: List[TorrentInfo],
+                             torrents_cache: Dict[str, List[Context]],
+                             music_cache: Dict[str, List[Context]]) -> None:
+        """
+        识别单个站点抓取到的新种子并写入影视与音乐缓存
+        :param indexer: 站点索引配置
+        :param domain: 站点域名
+        :param stype: 刷新类型，spider:爬虫，rss:rss
+        :param torrents: 站点最新种子列表
+        :param torrents_cache: 影视种子缓存
+        :param music_cache: 音乐种子缓存
+        """
+        # 按pubdate降序排列
+        torrents.sort(key=lambda x: x.pubdate or '', reverse=True)
+        # 音乐与影视按同一公共参数独立计算刷新配额，并分别写入各自缓存，音乐不会被影视资源挤出
+        music_torrents = [
+            t for t in torrents if t.category == MediaType.MUSIC.value
+        ][:settings.CONF.refresh]
+        torrents = [
+            t for t in torrents if t.category != MediaType.MUSIC.value
+        ][:settings.CONF.refresh]
+        if not torrents and not music_torrents:
+            logger.info(f'{indexer.get("name")} 没有获取到种子')
+            return
+        if self._is_no_cache_site(domain):
+            # 不需要缓存的站点，直接处理
+            logger.info(f'{indexer.get("name")} 有 {len(torrents) + len(music_torrents)} 个种子 (不缓存)')
+            torrents_cache[domain] = []
+            music_cache[domain] = []
+        else:
+            # 过滤出没有处理过的种子 - 优化：使用集合查找，避免重复创建字符串列表
+            cached_signatures = {f'{t.torrent_info.title}{t.torrent_info.description}'
+                                 for t in torrents_cache.get(domain) or []}
+            torrents = [torrent for torrent in torrents
+                        if f'{torrent.title}{torrent.description}' not in cached_signatures]
+            # 音乐种子对照音乐独立缓存去重
+            music_signatures = {f'{t.torrent_info.title}{t.torrent_info.description}'
+                                for t in music_cache.get(domain) or []}
+            music_torrents = [torrent for torrent in music_torrents
+                              if f'{torrent.title}{torrent.description}' not in music_signatures]
+        if torrents or music_torrents:
+            logger.info(f'{indexer.get("name")} 有 {len(torrents) + len(music_torrents)} 个新种子')
+        else:
+            logger.info(f'{indexer.get("name")} 没有新种子')
+            return
+        try:
+            for torrent in torrents + music_torrents:
+                if global_vars.is_system_stopped:
+                    break
+                if not torrent.enclosure:
+                    logger.warn(f"缺少种子链接，忽略处理: {torrent.title}")
+                    continue
+                logger.info(f'处理资源：{torrent.title} ...')
+                if torrent.category == MediaType.MUSIC.value:
+                    meta = MetaMusic.parse_query(torrent.title)
+                    mediainfo = MusicInfo(
+                        title=meta.title,
+                        artists=list(meta.artists),
+                        album=meta.album,
+                        year=meta.year,
+                        names=[meta.title] if meta.title else [],
+                    )
+                    candidate_recognized = False
+                    match_source = "unknown"
+                else:
+                    meta = MetaInfo(title=torrent.title, subtitle=torrent.description)
+                    if torrent.title != meta.org_string:
+                        logger.info(f'种子名称应用识别词后发生改变：{torrent.title} => {meta.org_string}')
+                    # 使用站点种子分类，校正类型识别
+                    if meta.type != MediaType.TV \
+                            and torrent.category == MediaType.TV.value:
+                        meta.type = MediaType.TV
+                    mediainfo = MediaChain().recognize_by_meta(
+                        meta,
+                        obtain_images=False,
+                    )
+                    if not mediainfo:
+                        logger.warn(f'{torrent.title} 未识别到媒体信息')
+                        mediainfo = MediaInfo()
+                    mediainfo.clear()
+                    candidate_recognized = bool(
+                        mediainfo and all(resolve_media_identity(media=mediainfo))
+                    )
+                    match_source = self._get_media_id_match_source(mediainfo)
+                # 上下文
+                context = Context(
+                    meta_info=meta,
+                    media_info=mediainfo,
+                    torrent_info=torrent,
+                    resource_source="spider" if stype == "spider" else "rss",
+                    match_source=match_source if candidate_recognized else "unknown",
+                    candidate_recognized=candidate_recognized,
+                    media_info_is_target=False,
+                )
+                # 如果未识别到媒体信息，设置初始失败次数为1
+                if not mediainfo or not all(resolve_media_identity(media=mediainfo)):
+                    context.media_recognize_fail_count = 1
+                # 添加到缓存：音乐进入独立缓存，与影视分开存储
+                if torrent.category == MediaType.MUSIC.value:
+                    target_cache = music_cache
+                else:
+                    target_cache = torrents_cache
+                if not target_cache.get(domain):
+                    target_cache[domain] = [context]
+                else:
+                    target_cache[domain].append(context)
+                # 如果超过了限制条数则移除掉前面的，音乐与影视各自独立计算配额
+                if len(target_cache[domain]) > settings.CONF.torrents:
+                    target_cache[domain] = target_cache[domain][-settings.CONF.torrents:]
+        finally:
+            torrents.clear()
+            music_torrents.clear()
 
     @staticmethod
     def _ensure_context_compatibility(torrents_cache: Dict[str, List[Context]], stype: Optional[str] = None):
