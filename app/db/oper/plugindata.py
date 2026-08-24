@@ -95,10 +95,14 @@ class PluginDataOper(DbOper):
         :param key: 数据key，为空时删除该范围下的全部数据
         :param instance_id: 实例标识，为 None 时跨全部实例删除
         """
-        if key:
-            PluginData.del_plugin_data_by_key(self._db, plugin_id, key, instance_id)
-        else:
-            PluginData.del_plugin_data(self._db, plugin_id, instance_id)
+        def stage(session: Session) -> None:
+            """把兼容删除入口映射到调用方或组合根持有的事务。"""
+            if key:
+                PluginData.del_plugin_data_by_key(session, plugin_id, key, instance_id)
+            else:
+                PluginData.del_plugin_data(session, plugin_id, instance_id)
+
+        self._execute_sync_write(stage)
 
     def stage_delete(self, plugin_id: str) -> None:
         """暂存目标插件全部数据删除并 flush，不提交调用方事务。"""

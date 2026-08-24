@@ -54,6 +54,7 @@ from app.application.subscription.mutation import (
 )
 from app.application.subscription.transactional import TransactionalSubscribeWriter
 from app.application.subscription.write import configure_subscribe_writer
+from app.application.transaction import TransactionalWriteRunner
 from app.application.workflow_transactional import TransactionalWorkflowExecutionService
 from app.adapters.external.server import MoviePilotServerHelper
 from app.db.oper.agentchat import AgentChatOper
@@ -75,9 +76,14 @@ from app.db.oper.user_identity import UserIdentityOper
 from app.db.oper.userconfig import UserConfigOper
 from app.db.oper.workflow import WorkflowOper, configure_workflow_legacy_writer
 from app.db.session import SessionFactory, async_session_scope, get_async_db, get_db
-from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
+from app.db.uow import (
+    SqlAlchemyAsyncUnitOfWork,
+    SqlAlchemyUnitOfWork,
+    configure_transaction_runners,
+)
 from app.runtime.config import settings
 from app.runtime.events import EventManager
+from app.runtime.observability import record_metric
 from app.schemas.types import EventType
 
 
@@ -228,6 +234,10 @@ def _build_outbox_dispatcher() -> OutboxDispatcher:
             ),
         },
         close=session.close,
+        failure_observer=lambda dead: record_metric(
+            "scheduler.job.dead_letter" if dead else "scheduler.job.retry",
+            owner="outbox",
+        ),
     )
 
 
@@ -266,6 +276,16 @@ def configure_application_service_ports() -> None:
 
 def configure_data_ports() -> None:
     """登记全部应用数据端口，使各层在启动完成后按端口而非按 Oper 取用持久化能力。"""
+    # 兼容 Oper 的无 Session 写入口仍由组合根持有事务，避免模型恢复自动提交；
+    # 必须先于其余端口装配，任何写入口在装配期间就可能被触发。
+    transaction_runner = TransactionalWriteRunner(
+        sync_session=SessionFactory,
+        async_session=async_session_scope,
+    )
+    configure_transaction_runners(
+        sync=transaction_runner.sync,
+        async_=transaction_runner.async_,
+    )
     configure_request_data_ports()
     configure_orchestration_data_ports()
     configure_application_service_ports()

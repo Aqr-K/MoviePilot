@@ -117,7 +117,6 @@ class DownloadFailure(Base):
         return failure
 
     @classmethod
-    @db_update
     def delete_expired(
             cls,
             db: Session,

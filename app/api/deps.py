@@ -174,7 +174,10 @@ def get_user_service(
         db: AsyncSession = Depends(get_async_db),
 ) -> UserService:
     """组装用户管理应用服务。"""
-    return UserService(repository=_repository("user", db))
+    return UserService(
+        repository=_repository("user", db),
+        unit_of_work=_transaction("async", db),
+    )
 
 
 def get_auth_service() -> AuthService:

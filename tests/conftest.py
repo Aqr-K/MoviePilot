@@ -6,6 +6,7 @@
 import sys
 
 import pytest
+from sqlalchemy.orm import Session
 
 # 必须早于首个牵入 app.runtime.config 的 import（app.db / app.application.orchestration.* 都会牵入）：引擎本身已惰性，
 # import app.db 不再连库，但 settings 在 import 期就把 CONFIG_DIR 读进字段并建好配置目录，之后
@@ -46,7 +47,11 @@ def configure_plugin_system_services():
         get_async_db,
         get_db,
     )
-    from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
+    from app.db.uow import (
+        SqlAlchemyAsyncUnitOfWork,
+        SqlAlchemyUnitOfWork,
+        configure_transaction_runners,
+    )
     from app.db.oper.serviceconfig import ServiceConfigOper
     from app.db.oper.systemconfig import SystemConfigOper
     from app.runtime.extensions.service_config import (
@@ -103,6 +108,22 @@ def configure_plugin_system_services():
     from app.application.subscription.transactional import TransactionalSubscribeWriter
     from app.application.workflow_transactional import (
         TransactionalWorkflowExecutionService,
+    )
+    from app.application.transaction import TransactionalWriteRunner
+
+    def compatibility_sync_session() -> Session:
+        """动态读取可被存量隔离数据库用例替换的 ScopedSession。"""
+        from app.db import decorators
+
+        return decorators.ScopedSession()
+
+    transaction_runner = TransactionalWriteRunner(
+        sync_session=compatibility_sync_session,
+        async_session=async_session_scope,
+    )
+    configure_transaction_runners(
+        sync=transaction_runner.sync,
+        async_=transaction_runner.async_,
     )
 
     configure_api_data_ports(
