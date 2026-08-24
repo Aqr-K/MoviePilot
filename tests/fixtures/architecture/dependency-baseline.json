@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7052,
-  "edge_sha256": "082d3ce1b9db74de46a8c8145c9084d70cd5e5ad5183d4cc356e78f098ac62bf",
+  "edge_count": 7055,
+  "edge_sha256": "791a1f306827d8af364c45ec39c8c0f1331f0862771982c3cee1fa83d4a041a2",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3937,6 +3937,9 @@
     "app.db.session -> app.runtime.observability",
     "app.doctor.checks -> app.adapters",
     "app.doctor.checks -> app.adapters.system",
+    "app.doctor.checks -> app.adapters.system.backup",
+    "app.doctor.checks -> app.adapters.system.backup.database",
+    "app.doctor.checks -> app.adapters.system.backup.files",
     "app.doctor.checks -> app.adapters.system.host",
     "app.doctor.checks -> app.doctor",
     "app.doctor.checks -> app.doctor.models",
