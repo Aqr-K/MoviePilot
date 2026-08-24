@@ -16,6 +16,7 @@ from app.runtime.extensions.contract.extension import (
 from app.runtime.extensions.lifecycle.host_module_adapter import HostModuleProviderSource
 from app.runtime.extensions.contract.module_method import (
     diagnose_module_callable,
+    diagnose_module_result,
     get_module_method_contract,
     is_explicit_module_method,
 )
@@ -357,7 +358,9 @@ class ModuleInvocationDispatcher:
             self._announce_invocation(provider, method)
             self._record_legacy_hit(method, provider)
             self._diagnose_callable(method, provider.invoke, provider.display_name)
-            return provider.invoke(*args, **kwargs)
+            result = provider.invoke(*args, **kwargs)
+            self._diagnose_result(method, result, provider)
+            return result
         except RateLimitExceededException as err:
             self._report_rate_limit(provider, method, err, **kwargs)
         except Exception as err:
@@ -383,7 +386,9 @@ class ModuleInvocationDispatcher:
             self._announce_invocation(provider, method)
             self._record_legacy_hit(method, provider)
             self._diagnose_callable(method, provider.invoke, provider.display_name)
-            return await self._async_call(provider.invoke, *args, **kwargs)
+            result = await self._async_call(provider.invoke, *args, **kwargs)
+            self._diagnose_result(method, result, provider)
+            return result
         except RateLimitExceededException as err:
             self._report_rate_limit(provider, method, err, **kwargs)
         except Exception as err:
@@ -414,13 +419,16 @@ class ModuleInvocationDispatcher:
                 self._diagnose_callable(method, provider.invoke, provider.display_name)
                 if self.is_valid_empty(result):
                     result = provider.invoke(*args, **kwargs)
+                    self._diagnose_result(method, result, provider)
                 elif provider.relays_result and ObjectUtils.check_signature(
                     provider.invoke,
                     result,
                 ):
                     result = provider.invoke(result)
+                    self._diagnose_result(method, result, provider)
                 elif isinstance(result, list):
                     temp = provider.invoke(*args, **kwargs)
+                    self._diagnose_result(method, temp, provider)
                     if isinstance(temp, list):
                         result.extend(temp)
                 else:
@@ -455,13 +463,16 @@ class ModuleInvocationDispatcher:
                 self._diagnose_callable(method, provider.invoke, provider.display_name)
                 if self.is_valid_empty(result):
                     result = await self._async_call(provider.invoke, *args, **kwargs)
+                    self._diagnose_result(method, result, provider)
                 elif provider.relays_result and ObjectUtils.check_signature(
                     provider.invoke,
                     result,
                 ):
                     result = await self._async_call(provider.invoke, result)
+                    self._diagnose_result(method, result, provider)
                 elif isinstance(result, list):
                     temp = await self._async_call(provider.invoke, *args, **kwargs)
+                    self._diagnose_result(method, temp, provider)
                     if isinstance(temp, list):
                         result.extend(temp)
                 else:
@@ -577,6 +588,29 @@ class ModuleInvocationDispatcher:
                 "%s 的模块方法 %s 与契约不一致：%s；当前仅诊断",
                 owner,
                 method,
+                ", ".join(problems),
+            )
+
+    @staticmethod
+    def _diagnose_result(method: str, result: Any, provider: ExtensionProvider) -> None:
+        """记录 provider 结果形状偏差，保持旧插件返回值原样继续执行。"""
+        problems = diagnose_module_result(method, result)
+        if problems:
+            provider_type = (
+                "plugin"
+                if provider.fault_scope is ExtensionFaultScope.PLUGIN
+                else "system"
+            )
+            record_metric(
+                "module.contract.result_mismatch",
+                method=method,
+                provider_type=provider_type,
+                problem=problems[0],
+            )
+            logger.warning(
+                "模块方法 %s 的 %s provider 返回值与契约不一致：%s；当前仅诊断",
+                method,
+                provider_type,
                 ", ".join(problems),
             )
 

@@ -7,6 +7,7 @@ from fastapi import Depends, Request
 
 from app.api.host_runtime import AgentChatRuntime, HostRuntime
 from app.application.messaging.chat import AsyncAgentChatRepository, AsyncUnitOfWork
+from app.runtime.tasks import TaskRegistry, get_task_registry
 
 
 def get_host_runtime(request: Request) -> HostRuntime:
@@ -15,6 +16,18 @@ def get_host_runtime(request: Request) -> HostRuntime:
     if not isinstance(runtime, HostRuntime):
         raise RuntimeError("HostRuntime 尚未由启动组合根装配")
     return runtime
+
+
+def get_background_task_registry() -> TaskRegistry:
+    """返回当前 lifespan 统一管理的后台任务登记器。"""
+    return get_task_registry()
+
+
+def resolve_background_task_registry(value: object) -> TaskRegistry:
+    """兼容直接调用 endpoint 的旧入口，并优先使用注入的任务登记器。"""
+    if isinstance(value, TaskRegistry):
+        return value
+    return get_task_registry()
 
 
 def get_agent_chat_runtime(

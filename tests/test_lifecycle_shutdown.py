@@ -253,6 +253,7 @@ def test_lifecycle_manifest_declares_normal_and_safe_mode_order() -> None:
     safe_names = {item["name"] for item in safe}
 
     assert normal_start == [
+        "后台任务登记器",
         "数据库准备",
         "HTTP 基础能力",
         "领域依赖装配",
@@ -270,6 +271,7 @@ def test_lifecycle_manifest_declares_normal_and_safe_mode_order() -> None:
         "工作流",
     ]
     assert normal_stop == [
+        "后台任务登记器",
         "插件备份",
         "工作流",
         "命令服务",
@@ -280,6 +282,7 @@ def test_lifecycle_manifest_declares_normal_and_safe_mode_order() -> None:
         "HTTP 基础能力",
     ]
     assert safe_names == {
+        "后台任务登记器",
         "数据库准备",
         "HTTP 基础能力",
         "领域依赖装配",
