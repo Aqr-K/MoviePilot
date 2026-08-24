@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.db.base import Base, get_id_column
-from app.db.decorators import run_legacy_async_query, run_legacy_sync_query
+from app.db.decorators import legacy_async_db_query, legacy_db_query
 from app.db.models.user_identity import UserIdentity
 
 
@@ -36,6 +36,7 @@ class User(Base):
     settings: Mapped[Optional[Any]] = mapped_column(JSON, default=dict)
 
     @classmethod
+    @legacy_db_query
     def get_by_name(
         cls,
         db: Session | str | None = None,
@@ -51,11 +52,10 @@ class User(Base):
             """在给定会话中执行用户名查询。"""
             return session.execute(select(cls).where(cls.name == name)).scalars().first()
 
-        if isinstance(db, Session):
-            return query(db)
-        return run_legacy_sync_query(query)
+        return query(db)
 
     @classmethod
+    @legacy_async_db_query
     async def async_get_by_name(
         cls,
         db: AsyncSession | str | None = None,
@@ -72,9 +72,10 @@ class User(Base):
             result = await session.execute(select(cls).filter(cls.name == name))
             return result.scalars().first()
 
-        return await query(db) if isinstance(db, AsyncSession) else await run_legacy_async_query(query)
+        return await query(db)
 
     @classmethod
+    @legacy_db_query
     def get_by_id(cls, db: Session | int | None = None, user_id: int | None = None):
         """按用户 ID 查询用户，兼容显式会话和旧插件无会话调用。"""
         if user_id is None and isinstance(db, int):
@@ -86,11 +87,10 @@ class User(Base):
             """在给定会话中执行用户 ID 查询。"""
             return session.execute(select(cls).where(cls.id == user_id)).scalars().first()
 
-        if isinstance(db, Session):
-            return query(db)
-        return run_legacy_sync_query(query)
+        return query(db)
 
     @classmethod
+    @legacy_async_db_query
     async def async_get_by_id(
         cls,
         db: AsyncSession | int | None = None,
@@ -107,7 +107,7 @@ class User(Base):
             result = await session.execute(select(cls).filter(cls.id == user_id))
             return result.scalars().first()
 
-        return await query(db) if isinstance(db, AsyncSession) else await run_legacy_async_query(query)
+        return await query(db)
 
     def delete_by_name(self, db: Session, name: str):
         user = self.get_by_name(db, name)
