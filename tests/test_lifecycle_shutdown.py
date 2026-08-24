@@ -316,6 +316,30 @@ def test_startup_step_records_duration_without_changing_result(monkeypatch):
     )
 
 
+@pytest.mark.asyncio
+async def test_shutdown_step_cancels_and_awaits_callback_after_timeout():
+    """关闭阶段超时后必须显式取消回调协程并等到取消收口，而不是留下悬空任务。"""
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def blocked_step():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    await lifecycle.run_shutdown_step(
+        "契约测试",
+        blocked_step,
+        timeout_seconds=0.01,
+    )
+
+    assert started.is_set()
+    assert cancelled.is_set()
+
+
 def test_lifespan_creates_global_async_engine_at_startup(monkeypatch):
     """启动期必须把全局异步引擎建出来一次，让异步侧恢复 fail-fast
 
@@ -572,6 +596,21 @@ def test_stop_modules_continues_after_internal_owner_failures(monkeypatch):
         _assert_completed_once(dependency)
 
 
+def test_stop_modules_drains_web_agent_background_tasks_before_database(monkeypatch):
+    """关闭时必须先收口 Web Agent 后台任务，再关闭数据库连接。"""
+    order = []
+    monkeypatch.setattr(modules_initializer, "stop_agent", AsyncMock())
+    dependencies = _patch_module_shutdown_dependencies(monkeypatch)
+    dependencies["web_agent_background_tasks"].side_effect = (
+        lambda: order.append("web-agent")
+    )
+    dependencies["close_database"].side_effect = lambda: order.append("database")
+
+    asyncio.run(modules_initializer.stop_modules())
+
+    assert order == ["web-agent", "database"]
+
+
 def _patch_module_shutdown_dependencies(monkeypatch) -> dict:
     """替换 stop_modules 的资源所有者，避免测试启动真实后台服务"""
     dependencies = {}
@@ -621,6 +660,14 @@ def _patch_module_shutdown_dependencies(monkeypatch) -> dict:
     close_database = AsyncMock()
     monkeypatch.setattr(modules_initializer, "close_database", close_database)
     dependencies["close_database"] = close_database
+
+    shutdown_web_agent_background_tasks = AsyncMock()
+    monkeypatch.setattr(
+        modules_initializer,
+        "shutdown_web_agent_background_tasks",
+        shutdown_web_agent_background_tasks,
+    )
+    dependencies["web_agent_background_tasks"] = shutdown_web_agent_background_tasks
     return dependencies
 
 

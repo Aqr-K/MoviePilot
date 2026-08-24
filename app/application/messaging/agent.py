@@ -1,9 +1,10 @@
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from queue import Queue
 from threading import Lock
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Coroutine, Dict, List, Optional, Tuple, Union
 
 from app.runtime.channels import (  # noqa: F401  渠道管理员判定的对外导出
     matches_channel_admin,
@@ -179,6 +180,27 @@ agent_interaction_manager = AgentInteractionManager()
 
 _WEB_AGENT_EDIT_QUEUES: dict[str, list[Queue[dict]]] = {}
 _WEB_AGENT_EDIT_LOCK = Lock()
+
+# Web Agent 请求处理完成后仍需继续落库的后台任务（如展示消息快照）；
+# 登记在此才能在应用关闭时统一收口，避免数据库连接关闭前留下悬空任务。
+_WEB_AGENT_BACKGROUND_TASKS: "set[asyncio.Task]" = set()
+
+
+def create_web_agent_background_task(coro: Coroutine) -> "asyncio.Task":
+    """创建一个 Web Agent 后台任务并登记，任务结束后自动从登记表移除。"""
+    task = asyncio.create_task(coro)
+    _WEB_AGENT_BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_WEB_AGENT_BACKGROUND_TASKS.discard)
+    return task
+
+
+async def shutdown_web_agent_background_tasks() -> None:
+    """取消并等待全部已登记的 Web Agent 后台任务收口。"""
+    tasks = tuple(_WEB_AGENT_BACKGROUND_TASKS)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def normalize_web_agent_button_rows(buttons: Optional[list[list[dict]]]) -> list[list[dict]]:

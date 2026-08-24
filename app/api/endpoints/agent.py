@@ -57,6 +57,7 @@ from app.application.messaging.agent import attach_web_agent_edit_queue, detach_
 from app.application.messaging.agent import agent_interaction_manager
 from app.application.messaging.agent import (
     build_agent_choice_button_rows,
+    create_web_agent_background_task,
     normalize_web_agent_button_rows,
     parse_agent_choice_callback,
 )
@@ -85,7 +86,6 @@ _WEB_AGENT_FILE_REGISTRY: dict[str, dict[str, Any]] = {}
 _WEB_AGENT_MESSAGE_QUEUES: dict[str, list[Queue[_SchemaMessage]]] = {}
 _WEB_AGENT_MESSAGE_LOCK = Lock()
 _WEB_AGENT_MESSAGE_LISTENER_REGISTERED = False
-_WEB_AGENT_BACKGROUND_TASKS: set[asyncio.Task] = set()
 
 
 class _WebAgentEventPublisher:
@@ -2127,9 +2127,7 @@ async def web_agent_stream(
                 except Exception as err:
                     logger.error(f"保存WebAgent传统消息快照失败: {str(err)}")
 
-            snapshot_task = asyncio.create_task(save_display_snapshot())
-            _WEB_AGENT_BACKGROUND_TASKS.add(snapshot_task)
-            snapshot_task.add_done_callback(_WEB_AGENT_BACKGROUND_TASKS.discard)
+            snapshot_task = create_web_agent_background_task(save_display_snapshot())
             await asyncio.sleep(0)
             for event in events:
                 event_payload = copy.deepcopy(event)
@@ -2321,9 +2319,7 @@ async def web_agent_stream(
                         client_session_id=payload.session_id or session_id,
                     )
 
-        task = asyncio.create_task(run_agent())
-        _WEB_AGENT_BACKGROUND_TASKS.add(task)
-        task.add_done_callback(_WEB_AGENT_BACKGROUND_TASKS.discard)
+        task = create_web_agent_background_task(run_agent())
         disconnected = False
         terminal_sent = False
         try:

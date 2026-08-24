@@ -28,6 +28,7 @@ from app.adapters.system.resource import (
     ResourceHelper,
     configure_resource_version_provider,
 )
+from app.application.messaging.agent import shutdown_web_agent_background_tasks
 from app.application.messaging.message import (
     MessageHelper,
     MessageQueueManager,
@@ -381,6 +382,7 @@ async def stop_modules():
     await run_step("消息服务", stop_message)
     await run_step("Redis缓存连接", lambda: RedisHelper().close())
     await run_step("异步Redis缓存连接", lambda: AsyncRedisHelper().close())
+    await run_step("Web Agent后台任务", shutdown_web_agent_background_tasks)
     await run_step("数据库连接", close_database)
     await run_step("前端服务", stop_frontend)
     await run_step("临时文件", clear_temp)
