@@ -8,6 +8,7 @@ import re
 import socket
 import sqlite3
 import sys
+import time
 from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,8 @@ from app.runtime.compat.plugin_version_readiness import (
     PluginVersionReadiness,
     scan_plugin_version_readiness,
 )
+from app.runtime.diagnostics.blocking import get_event_loop_blocking_watchdog
+from app.runtime.diagnostics.loop_probe import get_loop_latency_probe
 from app.doctor.models import DoctorFinding, DoctorFindingStatus, DoctorReport, DoctorSeverity
 from app.adapters.system.host import SystemUtils
 
@@ -141,6 +144,7 @@ def default_checks() -> list[CheckFunc]:
         _check_runtime_paths,
         _check_config,
         _check_process_topology,
+        _check_event_loop_diagnostics,
         _check_processes_and_ports,
         _check_dependencies,
         _check_database,
@@ -566,6 +570,103 @@ def _check_process_topology(runner: DoctorRunnerProtocol) -> None:
         title="进程拓扑受支持",
         detail="API_WORKERS=1，插件和后台任务只会启动一份。",
         recommendation="保持单 worker；扩容前需要先拆分 API 数据面和控制面。",
+        context=context,
+    )
+
+
+def _event_loop_diagnostics_correlation_window_seconds() -> float:
+    """事件循环延迟滑动窗口覆盖的时间跨度，用于圈定阻塞采样归因的关联区间。"""
+    return (
+        settings.LOOP_LATENCY_PROBE_WINDOW_SIZE
+        * settings.LOOP_LATENCY_PROBE_INTERVAL_SECONDS
+    )
+
+
+def _check_event_loop_diagnostics(runner: DoctorRunnerProtocol) -> None:
+    """诊断事件循环延迟探针的统计结果，超标时结合阻塞采样归因到插件或线程饥饿。"""
+    probe = get_loop_latency_probe()
+    if probe is None:
+        runner.add(
+            finding_id="runtime.event_loop_latency",
+            severity=DoctorSeverity.Info,
+            status=DoctorFindingStatus.Skipped,
+            title="事件循环延迟探针未运行",
+            detail="当前进程未启动事件循环延迟探针（可能是独立诊断进程，或已通过配置关闭）。",
+            recommendation="如需诊断插件拖慢事件循环，请在正常运行的服务进程内查看该诊断项。",
+            affects_report_status=False,
+        )
+        return
+
+    snapshot = probe.snapshot()
+    context: dict[str, Any] = {
+        "sample_count": snapshot.sample_count,
+        "last_ms": round(snapshot.last_seconds * 1000, 1),
+        "p50_ms": round(snapshot.p50_seconds * 1000, 1),
+        "p95_ms": round(snapshot.p95_seconds * 1000, 1),
+        "max_ms": round(snapshot.max_seconds * 1000, 1),
+        "threshold_ms": round(snapshot.threshold_seconds * 1000, 1),
+    }
+
+    if not snapshot.exceeded_threshold:
+        runner.add(
+            finding_id="runtime.event_loop_latency",
+            severity=DoctorSeverity.Info,
+            status=DoctorFindingStatus.Ok,
+            title="事件循环延迟正常",
+            detail=(
+                f"最近 {snapshot.sample_count} 次采样最大延迟 {context['max_ms']}ms，"
+                f"未超过阈值 {context['threshold_ms']}ms。"
+            ),
+            recommendation="无需处理。",
+            context=context,
+        )
+        return
+
+    watchdog = get_event_loop_blocking_watchdog()
+    since = time.monotonic() - _event_loop_diagnostics_correlation_window_seconds()
+    attribution = watchdog.attribution_since(since) if watchdog else None
+
+    if attribution:
+        context.update(
+            {
+                "plugin_id": attribution.plugin_id,
+                "plugin_file": attribution.file,
+                "plugin_line": attribution.line,
+            }
+        )
+        runner.add(
+            finding_id="runtime.event_loop_latency",
+            severity=DoctorSeverity.Warn,
+            status=DoctorFindingStatus.Degraded,
+            title=f"事件循环延迟超标，定位到插件 {attribution.plugin_id}",
+            detail=(
+                f"最近 {snapshot.sample_count} 次采样最大延迟 {context['max_ms']}ms，"
+                f"超过阈值 {context['threshold_ms']}ms；阻塞采样线程在事件循环线程栈中命中"
+                f"插件代码 {attribution.file}:{attribution.line}（{attribution.function}）。"
+            ),
+            recommendation=(
+                f"检查插件 {attribution.plugin_id} 是否在协程中直接执行了同步阻塞调用，"
+                "将其改为线程池 offload 或异步实现；必要时先临时禁用该插件复测。"
+            ),
+            context=context,
+        )
+        return
+
+    runner.add(
+        finding_id="runtime.event_loop_latency",
+        severity=DoctorSeverity.Warn,
+        status=DoctorFindingStatus.Degraded,
+        title="事件循环延迟超标，未定位到插件代码",
+        detail=(
+            f"最近 {snapshot.sample_count} 次采样最大延迟 {context['max_ms']}ms，"
+            f"超过阈值 {context['threshold_ms']}ms；阻塞采样线程在此期间未在事件循环"
+            "线程栈中发现插件代码帧。"
+        ),
+        recommendation=(
+            "更可能是调度器或自建线程池的繁忙线程通过 GIL 争抢饿死了事件循环线程，"
+            "而非某个插件同步方法直接阻塞了协程；建议检查 APScheduler 与自建线程池"
+            "的占用情况，而不是先怀疑某个插件真的阻塞了事件循环。"
+        ),
         context=context,
     )
 

@@ -610,6 +610,23 @@ class ConfigModel(BaseModel):
     # 主动内存回收时间间隔（分钟），0为不启用
     MEMORY_GC_INTERVAL: int = 30
 
+    # ==================== 运行时诊断配置 ====================
+    # 事件循环延迟探针总开关：常驻协程周期性测量事件循环调度延迟，开销极低，默认开启
+    LOOP_LATENCY_PROBE_ENABLE: bool = True
+    # 探针采样周期（秒）
+    LOOP_LATENCY_PROBE_INTERVAL_SECONDS: float = 0.5
+    # 延迟滑动窗口保留的最近样本数量
+    LOOP_LATENCY_PROBE_WINDOW_SIZE: int = 120
+    # 单次采样延迟超过该阈值（秒）即记 WARNING 日志
+    LOOP_LATENCY_WARN_THRESHOLD_SECONDS: float = 0.2
+    # asyncio 内置慢回调告警阈值（秒），由事件循环自身对超时回调记 WARNING 日志
+    LOOP_SLOW_CALLBACK_DURATION_SECONDS: float = 0.2
+    # 事件循环阻塞检测总开关：判定当前是否运行在事件循环线程、从调用栈归因到插件；
+    # 只做只读栈帧采样，不 monkey-patch 标准库阻塞调用，默认开启
+    LOOP_BLOCKING_DETECTOR_ENABLE: bool = True
+    # 阻塞检测独立采样线程的采样周期（秒）
+    LOOP_BLOCKING_DETECTOR_SAMPLE_INTERVAL_SECONDS: float = 0.1
+
     # ==================== 安全配置 ====================
     # 允许的图片缓存域名
     SECURITY_IMAGE_DOMAINS: list = Field(

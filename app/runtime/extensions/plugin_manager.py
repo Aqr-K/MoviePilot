@@ -28,6 +28,7 @@ from app.foundation.version import compare_version
 from app.runtime.log import bind_plugin_instance, logger
 from app.runtime.config import settings
 from app.runtime.events import Event, EventHandlerBinding, eventmanager
+from app.runtime.execution import run_in_threadpool
 from app.runtime.reload import ConfigReloadMixin
 from app.runtime.deprecation.policy import is_active as deprecation_is_active
 from app.runtime.deprecation.policy import warn as deprecation_warn
@@ -55,6 +56,7 @@ from app.runtime.extensions.contract.instance import (
     split_instance_key,
 )
 from app.runtime.extensions.admission.instance_selection import resolve_plugin_instance_key
+from app.runtime.extensions.plugin_quota import PluginExecutionQuota
 from app.runtime.extensions.lifecycle.layout import (
     ensure_plugin_version_dir_available,
     plugin_module_name,
@@ -360,6 +362,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         # 插件包写入期间的监控抑制计数，按插件标识引用计数
         self._monitor_suppression_lock = threading.Lock()
         self._suppressed_monitor_plugins: Dict[str, int] = {}
+        # 插件占用共享线程的并发闸门，按插件类发放槽位
+        self._execution_quota = PluginExecutionQuota()
         # 事件总线只通过通用解析器访问运行中的插件实例。
         eventmanager.register_handler_instance_resolver(
             "plugins",
@@ -1049,6 +1053,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                     eventmanager.disable_event_handler(plugin_class)
                 # 停止只释放数据库连接，不销毁库文件——销毁只在明确删除插件数据的路径触发
                 _plugin_database_release(plugin_id)
+                # 插件不再运行后释放其并发配额记录，映射不随插件启停无界增长
+                self._execution_quota.discard(plugin_id)
             # 清除所有插件模块缓存
             self._clear_plugin_modules()
         self.clear_plugin_agent_tools_cache()
@@ -1086,6 +1092,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             eventmanager.disable_event_handler(plugin_class)
         # 停止只释放数据库连接，不销毁库文件——销毁只在明确删除插件数据的路径触发
         _plugin_database_release(plugin_id)
+        # 整族停止后释放并发配额记录，映射不随插件启停无界增长
+        self._execution_quota.discard(plugin_id)
         # 清除插件模块缓存，包括所有子模块
         self._clear_plugin_modules(plugin_id)
 
@@ -3242,6 +3250,10 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     async def async_run_plugin_method(self, pid: str, method: str, *args, **kwargs) -> Any:
         """
         异步运行插件方法
+
+        同步方法在该插件的并发配额内卸载到线程执行：插件内部的阻塞或 CPU 密集代码
+        既不占住事件循环，也吃不光其他插件与宿主共用的线程。协程方法不占用线程，
+        直接 await，不经配额。
         :param pid: 实例键，或插件ID（按该插件的默认调用目标裁决）
         :param method: 方法名
         :param args: 参数
@@ -3249,7 +3261,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         :return: 方法返回值；插件未运行或未实现该方法时为 None
         :raises LookupError: 该插件有实例在运行，但没有已启用的默认调用目标
         """
-        plugin = self._resolve_call_target(pid)
+        key = self._resolve_call_target_key(pid)
+        plugin = self._plugin_registry.instance(key) if key is not None else None
         if not plugin:
             return None
         if not hasattr(plugin, method):
@@ -3257,8 +3270,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         method_func = getattr(plugin, method)
         if asyncio.iscoroutinefunction(method_func):
             return await method_func(*args, **kwargs)
-        else:
-            return method_func(*args, **kwargs)
+        async with self._execution_quota.async_slot(extension_id_of(key)):
+            return await run_in_threadpool(method_func, *args, **kwargs)
 
     def get_plugin_ids(self) -> List[str]:
         """

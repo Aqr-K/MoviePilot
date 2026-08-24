@@ -254,6 +254,7 @@ def test_lifecycle_manifest_declares_normal_and_safe_mode_order() -> None:
 
     assert normal_start == [
         "并发线程槽",
+        "事件循环诊断",
         "数据库准备",
         "HTTP 基础能力",
         "领域依赖装配",
@@ -279,9 +280,11 @@ def test_lifecycle_manifest_declares_normal_and_safe_mode_order() -> None:
         "插件",
         "模块服务",
         "HTTP 基础能力",
+        "事件循环诊断",
     ]
     assert safe_names == {
         "并发线程槽",
+        "事件循环诊断",
         "数据库准备",
         "HTTP 基础能力",
         "领域依赖装配",

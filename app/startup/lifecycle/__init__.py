@@ -51,6 +51,14 @@ from app.startup.scheduler_initializer import (
     init_plugin_scheduler,
 )
 from app.db import check_connection_budget, get_engine, get_global_async_engine
+from app.runtime.diagnostics.blocking import (
+    start_event_loop_blocking_watchdog,
+    stop_event_loop_blocking_watchdog,
+)
+from app.runtime.diagnostics.loop_probe import (
+    start_loop_latency_probe,
+    stop_loop_latency_probe,
+)
 from app.runtime.thread import configure_default_thread_limiter
 from app.startup.transfer_initializer import replay_pending_transfers
 from app.startup.workflow_initializer import init_workflow, stop_workflow
@@ -130,6 +138,18 @@ async def run_startup_step(
         logger.info("启动%s完成，耗时=%.2fms", name, elapsed_ms)
 
 
+def start_event_loop_diagnostics() -> None:
+    """启动事件循环延迟探针与阻塞检测采样线程，按各自配置开关独立生效。"""
+    start_loop_latency_probe()
+    start_event_loop_blocking_watchdog()
+
+
+async def stop_event_loop_diagnostics() -> None:
+    """停止事件循环延迟探针与阻塞检测采样线程，并清空进程内实例引用。"""
+    await stop_loop_latency_probe()
+    stop_event_loop_blocking_watchdog()
+
+
 def prepare_plugin_restore() -> None:
     """先装配插件外部系统服务，再恢复插件及其依赖。"""
     configure_plugin_services()
@@ -158,6 +178,15 @@ def build_lifecycle_components(app: FastAPI) -> tuple[LifecycleComponent, ...]:
             start=configure_default_thread_limiter,
             start_order=1,
             start_timeout_seconds=10,
+        ),
+        LifecycleComponent(
+            name="事件循环诊断",
+            start=start_event_loop_diagnostics,
+            stop=stop_event_loop_diagnostics,
+            start_order=2,
+            stop_order=90,
+            start_timeout_seconds=10,
+            stop_timeout_seconds=10,
         ),
         LifecycleComponent(
             name="数据库准备",
