@@ -23,6 +23,10 @@ from app.application.messaging.chat import (
     configure_agent_chat_service,
 )
 from app.application.orchestration.data import configure_chain_data_ports
+from app.application.orchestration.durable_events import (
+    restore_download_added,
+    restore_transfer_result,
+)
 from app.application.outbox import (
     OutboxDispatcher,
     SqlAlchemyAsyncOutboxStager,
@@ -205,6 +209,18 @@ def _build_outbox_dispatcher() -> OutboxDispatcher:
             "subscribe.deleted": lambda message: EventManager().send_event(
                 EventType.SubscribeDeleted,
                 message.payload,
+            ),
+            "download.added": lambda message: EventManager().send_event(
+                EventType.DownloadAdded,
+                restore_download_added(message.payload),
+            ),
+            "transfer.completed": lambda message: EventManager().send_event(
+                EventType.TransferComplete,
+                restore_transfer_result(message.payload),
+            ),
+            "transfer.failed": lambda message: EventManager().send_event(
+                EventType.TransferFailed,
+                restore_transfer_result(message.payload),
             ),
         },
         close=session.close,

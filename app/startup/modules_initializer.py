@@ -53,7 +53,7 @@ from app.db.oper.serviceconfig import ServiceConfigOper
 from app.db.oper.subscribe import SubscribeOper
 from app.db.oper.systemconfig import SystemConfigOper
 from app.db.oper.workflow import WorkflowOper
-from app.db.session import get_async_db
+from app.db.session import SessionFactory, get_async_db
 from app.db.uow import SqlAlchemyAsyncUnitOfWork
 from app.application.messaging.gateway import CommandChain
 from app.schemas.message import Message
@@ -71,6 +71,9 @@ from app.application.image import configure_wallpaper_providers
 from app.application.orchestration.context import (
     ChainRuntimeContext,
     configure_chain_runtime_context_provider,
+)
+from app.application.orchestration.transactional_events import (
+    TransactionalChainDurableEventWriter,
 )
 from app.application.service_config import (
     ServiceInstanceConfigService,
@@ -106,6 +109,7 @@ def build_default_chain_runtime_context() -> ChainRuntimeContext:
         async_file_cache=AsyncFileCache(),
         message_queue_factory=lambda callback: MessageQueueManager(send_callback=callback),
         module_dispatcher_factory=ModuleInvocationDispatcher,
+        durable_event_writer=TransactionalChainDurableEventWriter(SessionFactory),
     )
 
 

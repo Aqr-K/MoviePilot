@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session
 
 from app.db.base import execute_dml
 from app.db.models.outbox import OutboxMessage
+
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +48,70 @@ class AsyncOutboxTransaction(Protocol):
 
     async def complete_by_event_key(self, event_key: str, completed_at: datetime) -> None:
         """业务事务提交且副作用已发布后，按幂等键收口对应 intent。"""
+
+
+class SyncUnitOfWork(Protocol):
+    """同步 durable 业务切片的最小事务端口。"""
+
+    def commit(self) -> None:
+        """提交业务写入与 outbox intent。"""
+
+    def rollback(self) -> None:
+        """回滚业务写入与 outbox intent。"""
+
+
+class SyncOutboxTransaction(Protocol):
+    """同步业务事务暂存并收口 durable intent 的最小端口。"""
+
+    def stage(self, intent: OutboxIntent, now: datetime) -> None:
+        """把 intent 加入调用方事务，但不自行提交。"""
+
+    def complete_by_event_key(
+        self,
+        event_key: str,
+        completed_at: datetime,
+    ) -> None:
+        """即时投递成功后按幂等键标记 intent 完成。"""
+
+
+class DurableEventCommand:
+    """把一次同步业务写入与可恢复事件 intent 原子提交。"""
+
+    def __init__(
+        self,
+        unit_of_work: SyncUnitOfWork,
+        outbox: SyncOutboxTransaction,
+    ) -> None:
+        """注入共享同一 Session 的事务与 outbox 端口。"""
+        self._unit_of_work = unit_of_work
+        self._outbox = outbox
+
+    def execute(
+        self,
+        *,
+        intent: OutboxIntent | Callable[[T], OutboxIntent],
+        stage_business: Callable[[], T],
+        publish: Callable[[], None],
+        after_commit: Callable[[], None] | None = None,
+    ) -> T:
+        """先原子提交业务与 intent，再保持原顺序执行提交后动作和即时广播。"""
+        try:
+            result = stage_business()
+            resolved_intent = intent(result) if callable(intent) else intent
+            self._outbox.stage(resolved_intent, datetime.now(timezone.utc))
+            self._unit_of_work.commit()
+        except Exception:
+            self._unit_of_work.rollback()
+            raise
+
+        if after_commit:
+            after_commit()
+        publish()
+        self._outbox.complete_by_event_key(
+            resolved_intent.event_key,
+            datetime.now(timezone.utc),
+        )
+        return result
 
 
 class OutboxRepository(Protocol):
