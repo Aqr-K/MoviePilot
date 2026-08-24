@@ -339,6 +339,20 @@ def _load_subscribe_chain_class():
             return None
 
         @staticmethod
+        def sub_reg_durable(*args, **kwargs):
+            """
+            视同步新增统计上报为已确认。
+            """
+            return True
+
+        @staticmethod
+        async def async_sub_reg_durable(*args, **kwargs):
+            """
+            视异步新增统计上报为已确认。
+            """
+            return True
+
+        @staticmethod
         def get_subscribe_shares():
             """
             返回空的订阅共享数据。

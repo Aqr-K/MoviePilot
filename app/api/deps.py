@@ -109,7 +109,7 @@ def get_delete_subscribe_command(
         repository=_repository("subscribe", db),
         unit_of_work=_transaction("async", db),
         publish_deleted=_publish_subscribe_deleted,
-        report_deleted=MoviePilotServerHelper.async_sub_done,
+        report_deleted=MoviePilotServerHelper.async_sub_done_durable,
         outbox=_outbox("subscribe", db),
     )
 

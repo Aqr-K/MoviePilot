@@ -931,9 +931,10 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
             "username": context.username,
             "mediainfo": context.mediainfo.to_dict(),
         })
-        MoviePilotServerHelper.sub_reg_async(
+        if not MoviePilotServerHelper.sub_reg_durable(
             self.__subscribe_report_payload(context)
-        )
+        ):
+            raise RuntimeError("订阅新增统计上报未确认")
 
     async def __async_post_subscribe_added(
         self,
@@ -966,9 +967,10 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
             "username": context.username,
             "mediainfo": context.mediainfo.to_dict(),
         })
-        await MoviePilotServerHelper.async_sub_reg(
+        if not await MoviePilotServerHelper.async_sub_reg_durable(
             self.__subscribe_report_payload(context)
-        )
+        ):
+            raise RuntimeError("订阅新增统计上报未确认")
 
     def add(self, title: str, year: str,
             mtype: MediaType = None,

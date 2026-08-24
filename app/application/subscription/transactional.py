@@ -14,6 +14,7 @@ from app.application.subscription.write import (
     AsyncCreateSubscriptionCommand,
     CreateSubscriptionCommand,
     subscription_added_event_key,
+    subscription_added_report_key,
 )
 from app.db.oper.subscribe import SubscribeOper
 from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
@@ -59,6 +60,10 @@ class TransactionalSubscribeWriter:
                         subscription_added_event_key(subscribe_id, payload),
                         datetime.now(timezone.utc),
                     )
+                    outbox.complete_by_event_key(
+                        subscription_added_report_key(subscribe_id, payload),
+                        datetime.now(timezone.utc),
+                    )
 
             return command.execute(identity, payload, username, delivered)
         finally:
@@ -86,6 +91,10 @@ class TransactionalSubscribeWriter:
                     await after_commit(subscribe_id)
                     await outbox.complete_by_event_key(
                         subscription_added_event_key(subscribe_id, payload),
+                        datetime.now(timezone.utc),
+                    )
+                    await outbox.complete_by_event_key(
+                        subscription_added_report_key(subscribe_id, payload),
                         datetime.now(timezone.utc),
                     )
 
