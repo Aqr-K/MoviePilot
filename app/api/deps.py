@@ -86,15 +86,19 @@ def _transaction(name: str, session: Any) -> Any:
     return get_api_data_ports().transaction(name, session)
 
 
-async def _publish_subscribe_deleted(
-        subscribe_id: int,
-        subscribe_info: dict,
-) -> None:
+def _outbox(name: str, session: Any) -> Any:
+    """构造与请求会话共享事务的 outbox 暂存端口。"""
+    return get_api_data_ports().outbox(name, session)
+
+
+async def _publish_subscribe_deleted(payload: dict) -> None:
     """通过宿主事件总线发布已提交的订阅删除事件。"""
-    await eventmanager.async_send_event(
-        EventType.SubscribeDeleted,
-        {"subscribe_id": subscribe_id, "subscribe_info": subscribe_info},
-    )
+    await eventmanager.async_send_event(EventType.SubscribeDeleted, payload)
+
+
+async def _publish_subscribe_modified(payload: dict) -> None:
+    """通过宿主事件总线发布已提交的订阅修改事件。"""
+    await eventmanager.async_send_event(EventType.SubscribeModified, payload)
 
 
 def get_delete_subscribe_command(
@@ -106,6 +110,7 @@ def get_delete_subscribe_command(
         unit_of_work=_transaction("async", db),
         publish_deleted=_publish_subscribe_deleted,
         report_deleted=MoviePilotServerHelper.sub_done_async,
+        outbox=_outbox("subscribe", db),
     )
 
 
@@ -129,6 +134,7 @@ def get_delete_subscriptions_by_identity_command(
         unit_of_work=_transaction("async", db),
         publish_deleted=_publish_subscribe_deleted,
         handle_event_error=_log_subscribe_deleted_event_error,
+        outbox=_outbox("subscribe", db),
     )
 
 
@@ -197,6 +203,9 @@ def get_subscription_mutation_service(
     return SubscriptionMutationService(
         repository=_repository("subscribe", db),
         history_repository=_repository("subscribe_history", db),
+        unit_of_work=_transaction("async", db),
+        outbox=_outbox("subscribe", db),
+        publish_modified=_publish_subscribe_modified,
     )
 
 

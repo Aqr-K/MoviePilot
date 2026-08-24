@@ -1995,10 +1995,10 @@
     "EventType.SubscribeAdded": {
       "delivery": "durable_required",
       "error_behavior": "notify",
-      "legacy_reason": "现有插件 payload 尚未收敛为稳定 model，保留原始 dict ABI",
+      "legacy_reason": null,
       "mode": "broadcast",
       "ordering": "priority_queue",
-      "payload_contract": "legacy_dict",
+      "payload_contract": "SubscribeAddedEventData",
       "sensitive_fields": [],
       "visibility": "plugin_public"
     },
@@ -2015,10 +2015,10 @@
     "EventType.SubscribeDeleted": {
       "delivery": "durable_required",
       "error_behavior": "notify",
-      "legacy_reason": "现有插件 payload 尚未收敛为稳定 model，保留原始 dict ABI",
+      "legacy_reason": null,
       "mode": "broadcast",
       "ordering": "priority_queue",
-      "payload_contract": "legacy_dict",
+      "payload_contract": "SubscribeDeletedEventData",
       "sensitive_fields": [],
       "visibility": "plugin_public"
     },
@@ -2639,12 +2639,12 @@
         "consumers": [],
         "producers": [
           {
-            "caller": "app.agent.tools.impl.delete_subscribe",
+            "caller": "app.api.deps",
             "count": 1
           },
           {
-            "caller": "app.api.deps",
-            "count": 1
+            "caller": "app.startup.dataports_initializer",
+            "count": 2
           }
         ]
       },
@@ -2652,12 +2652,16 @@
         "consumers": [],
         "producers": [
           {
-            "caller": "app.agent.tools.impl.update_subscribe",
+            "caller": "app.api.deps",
             "count": 1
           },
           {
             "caller": "app.api.endpoints.subscribe",
             "count": 3
+          },
+          {
+            "caller": "app.startup.dataports_initializer",
+            "count": 2
           }
         ]
       },
@@ -2747,7 +2751,7 @@
         ]
       }
     },
-    "producer_count": 68
+    "producer_count": 71
   },
   "module_method_specs": {
     "async_discover": {

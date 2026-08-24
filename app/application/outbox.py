@@ -37,6 +37,16 @@ class ClaimedOutboxMessage:
     attempt: int
 
 
+class AsyncOutboxTransaction(Protocol):
+    """请求级用例在同一异步事务内暂存并收口 outbox 意图的最小端口。"""
+
+    async def stage(self, intent: OutboxIntent, now: datetime) -> None:
+        """在调用方当前异步事务中暂存意图，不自行提交。"""
+
+    async def complete_by_event_key(self, event_key: str, completed_at: datetime) -> None:
+        """业务事务提交且副作用已发布后，按幂等键收口对应 intent。"""
+
+
 class OutboxRepository(Protocol):
     """outbox 写入、claim 和终态更新所需的最小端口。"""
 

@@ -7,6 +7,8 @@ api / application / agent / workflow 各层只声明持久化端口，具体 Ope
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from app.api.data import configure_api_data_ports
 from app.application.agentdata import configure_agent_data_ports
 from app.application.configuration import (
@@ -23,6 +25,7 @@ from app.application.messaging.chat import (
 from app.application.orchestration.data import configure_chain_data_ports
 from app.application.outbox import (
     OutboxDispatcher,
+    SqlAlchemyAsyncOutboxStager,
     SqlAlchemyOutboxRepository,
     configure_outbox_dispatcher,
 )
@@ -37,8 +40,17 @@ from app.application.security.userconfig import (
     configure_user_configuration,
 )
 from app.application.site.query import SiteQueryService, configure_site_query_service
+from app.application.subscription.delete import (
+    DeleteSubscribeCommand,
+    configure_delete_subscribe_scope,
+)
+from app.application.subscription.mutation import (
+    SubscriptionMutationService,
+    configure_subscription_mutation_scope,
+)
 from app.application.subscription.transactional import TransactionalSubscribeWriter
 from app.application.subscription.write import configure_subscribe_writer
+from app.adapters.external.server import MoviePilotServerHelper
 from app.db.oper.agentchat import AgentChatOper
 from app.db.oper.agenttask import AgentTaskOper
 from app.db.oper.downloadfailure import DownloadFailureOper
@@ -93,6 +105,9 @@ def configure_request_data_ports() -> None:
             "async": SqlAlchemyAsyncUnitOfWork,
             "sync": SqlAlchemyUnitOfWork,
         },
+        outbox={
+            "subscribe": SqlAlchemyAsyncOutboxStager,
+        },
     )
 
 
@@ -128,6 +143,49 @@ def configure_orchestration_data_ports() -> None:
         )
     )
     configure_transfer_history_provider(TransferHistoryOper)
+    configure_transactional_subscription_scopes()
+
+
+async def _publish_subscribe_modified(payload: dict) -> None:
+    """通过宿主事件总线发布已提交的订阅修改事件。"""
+    await EventManager().async_send_event(EventType.SubscribeModified, payload)
+
+
+async def _publish_subscribe_deleted(payload: dict) -> None:
+    """通过宿主事件总线发布已提交的订阅删除事件。"""
+    await EventManager().async_send_event(EventType.SubscribeDeleted, payload)
+
+
+@asynccontextmanager
+async def _subscription_mutation_scope():
+    """为 Agent 等非 HTTP 入口创建独占订阅修改会话、事务与 outbox。"""
+    async with async_session_scope() as session:
+        yield SubscriptionMutationService(
+            repository=SubscribeOper(session),
+            history_repository=SubscribeHistoryOper(session),
+            unit_of_work=SqlAlchemyAsyncUnitOfWork(session),
+            outbox=SqlAlchemyAsyncOutboxStager(session),
+            publish_modified=_publish_subscribe_modified,
+        )
+
+
+@asynccontextmanager
+async def _delete_subscribe_scope():
+    """为 Agent 等非 HTTP 入口创建独占订阅删除会话、事务与 outbox。"""
+    async with async_session_scope() as session:
+        yield DeleteSubscribeCommand(
+            repository=SubscribeOper(session),
+            unit_of_work=SqlAlchemyAsyncUnitOfWork(session),
+            publish_deleted=_publish_subscribe_deleted,
+            report_deleted=MoviePilotServerHelper.sub_done_async,
+            outbox=SqlAlchemyAsyncOutboxStager(session),
+        )
+
+
+def configure_transactional_subscription_scopes() -> None:
+    """登记 Agent 等非 HTTP 入口复用的订阅修改与删除事务作用域。"""
+    configure_subscription_mutation_scope(_subscription_mutation_scope)
+    configure_delete_subscribe_scope(_delete_subscribe_scope)
 
 
 def _build_outbox_dispatcher() -> OutboxDispatcher:
@@ -139,7 +197,15 @@ def _build_outbox_dispatcher() -> OutboxDispatcher:
             "subscribe.added": lambda message: EventManager().send_event(
                 EventType.SubscribeAdded,
                 message.payload,
-            )
+            ),
+            "subscribe.modified": lambda message: EventManager().send_event(
+                EventType.SubscribeModified,
+                message.payload,
+            ),
+            "subscribe.deleted": lambda message: EventManager().send_event(
+                EventType.SubscribeDeleted,
+                message.payload,
+            ),
         },
         close=session.close,
     )

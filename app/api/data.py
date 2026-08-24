@@ -11,6 +11,7 @@ AsyncSessionProvider = Callable[[], AsyncGenerator[Any, None]]
 RepositoryFactory = Callable[[Any], Any]
 StandaloneFactory = Callable[[], Any]
 UnitOfWorkFactory = Callable[[Any], Any]
+OutboxFactory = Callable[[Any], Any]
 
 
 class ApiDataPorts:
@@ -24,6 +25,7 @@ class ApiDataPorts:
         repositories: dict[str, RepositoryFactory],
         standalone: dict[str, StandaloneFactory],
         unit_of_work: dict[str, UnitOfWorkFactory],
+        outbox: dict[str, OutboxFactory] | None = None,
     ) -> None:
         """保存由启动组合根提供的具体实现工厂。"""
         self.sync_session = sync_session
@@ -31,6 +33,7 @@ class ApiDataPorts:
         self.repositories = repositories
         self.standalone = standalone
         self.unit_of_work = unit_of_work
+        self.outbox_factories = outbox or {}
 
     def repository(self, name: str, session: Any) -> Any:
         """按能力名构造请求级仓储。"""
@@ -43,6 +46,10 @@ class ApiDataPorts:
     def transaction(self, name: str, session: Any) -> Any:
         """构造请求级事务端口。"""
         return self.unit_of_work[name](session)
+
+    def outbox(self, name: str, session: Any) -> Any:
+        """构造与请求会话共享事务的 outbox 暂存端口。"""
+        return self.outbox_factories[name](session)
 
 
 _ports: ApiDataPorts | None = None
@@ -61,6 +68,7 @@ def configure_api_data_ports(
     repositories: dict[str, RepositoryFactory],
     standalone: dict[str, StandaloneFactory],
     unit_of_work: dict[str, UnitOfWorkFactory],
+    outbox: dict[str, OutboxFactory] | None = None,
 ) -> None:
     """由启动组合根登记 API 数据实现，切断 API 对数据库实现包的直接导入。"""
     configure_api_data_runtime(ApiDataPorts(
@@ -69,6 +77,7 @@ def configure_api_data_ports(
         repositories=repositories,
         standalone=standalone,
         unit_of_work=unit_of_work,
+        outbox=outbox,
     ))
 
 

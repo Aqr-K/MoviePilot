@@ -42,6 +42,20 @@ class _UnitOfWork:
         """模拟回滚。"""
 
 
+class _Outbox:
+    """记录绑定会话的异步 outbox 替身。"""
+
+    def __init__(self, session: object) -> None:
+        """保存与仓储相同的请求会话。"""
+        self.session = session
+
+    async def stage(self, intent, now) -> None:
+        """模拟暂存 durable intent。"""
+
+    async def complete_by_event_key(self, event_key, completed_at) -> None:
+        """模拟收口 durable intent。"""
+
+
 def _runtime() -> HostRuntime:
     """构造不加载数据库引擎或 PluginManager 的假宿主运行时。"""
     async def async_session():
@@ -59,6 +73,7 @@ def _runtime() -> HostRuntime:
         repositories={},
         standalone={},
         unit_of_work={},
+        outbox={"subscribe": _Outbox},
     )
     return HostRuntime(
         agent_chat=AgentChatRuntime(
@@ -80,6 +95,17 @@ def test_host_runtime_is_frozen_slotted_and_reuses_compatibility_facade() -> Non
     assert get_api_data_ports() is runtime.compatibility_api_data
     with pytest.raises(FrozenInstanceError):
         runtime.agent_chat = runtime.agent_chat
+
+
+def test_compatibility_facade_outbox_shares_repository_session() -> None:
+    """outbox 工厂按能力名绑定与仓储相同的请求会话，供订阅写用例复用。"""
+    compatibility = _runtime().compatibility_api_data
+    session = object()
+
+    outbox = compatibility.outbox("subscribe", session)
+
+    assert isinstance(outbox, _Outbox)
+    assert outbox.session is session
 
 
 def test_fastapi_dependencies_use_fake_runtime_without_real_services() -> None:
