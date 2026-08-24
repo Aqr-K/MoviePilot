@@ -1,12 +1,12 @@
 {
   "model_decorators": {
     "by_kind": {
-      "async_db_query": 14,
+      "async_db_query": 13,
       "async_db_update": 5,
-      "db_query": 22,
+      "db_query": 20,
       "db_update": 12
     },
-    "count": 53,
+    "count": 50,
     "methods": [
       {
         "decorator": "db_query",
@@ -202,21 +202,6 @@
         "decorator": "db_query",
         "file": "app/db/models/subscribehistory.py",
         "method": "SubscribeHistory.list_by_type"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/systemconfig.py",
-        "method": "SystemConfig.async_get_by_key"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/systemconfig.py",
-        "method": "SystemConfig.get_by_key"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/transferpending.py",
-        "method": "TransferPending.list_all"
       },
       {
         "decorator": "async_db_update",
