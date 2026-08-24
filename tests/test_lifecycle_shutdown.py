@@ -317,8 +317,8 @@ def test_startup_step_records_duration_without_changing_result(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_shutdown_step_cancels_and_awaits_callback_after_timeout():
-    """关闭阶段超时后必须显式取消回调协程并等到取消收口，而不是留下悬空任务。"""
+async def test_shutdown_step_requests_cancellation_after_timeout():
+    """关闭阶段超时后必须显式取消回调协程，收尾结果交给 done 回调异步消费。"""
     started = asyncio.Event()
     cancelled = asyncio.Event()
 
@@ -337,7 +337,45 @@ async def test_shutdown_step_cancels_and_awaits_callback_after_timeout():
     )
 
     assert started.is_set()
-    assert cancelled.is_set()
+    await asyncio.wait_for(cancelled.wait(), timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_timeout_has_hard_bound_for_nonconverging_cleanup() -> None:
+    """关闭收尾不响应取消时，生命周期调用仍必须在预算内返回。"""
+    started = asyncio.Event()
+    cancel_requested = asyncio.Event()
+    release = asyncio.Event()
+    settled = asyncio.Event()
+
+    async def nonconverging_shutdown() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancel_requested.set()
+            await release.wait()
+            settled.set()
+            raise
+
+    started_at = asyncio.get_running_loop().time()
+    shutdown = asyncio.create_task(
+        lifecycle.run_shutdown_step(
+            "不可收敛阶段",
+            nonconverging_shutdown,
+            timeout_seconds=0.01,
+        )
+    )
+    await started.wait()
+    await shutdown
+
+    elapsed = asyncio.get_running_loop().time() - started_at
+    assert elapsed < 0.2
+    await asyncio.wait_for(cancel_requested.wait(), timeout=0.2)
+    assert not settled.is_set()
+
+    release.set()
+    await asyncio.wait_for(settled.wait(), timeout=0.2)
 
 
 def test_lifespan_creates_global_async_engine_at_startup(monkeypatch):

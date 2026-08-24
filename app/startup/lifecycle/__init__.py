@@ -97,23 +97,33 @@ async def run_shutdown_step(
     callback: Callable[[], object],
     timeout_seconds: float | None = None,
 ) -> None:
-    """隔离单个关闭阶段的异常，确保后续资源仍有机会释放"""
+    """在有限预算内执行关闭阶段，并保留未收敛任务的资源所有权。"""
     try:
         result = callback()
         if inspect.isawaitable(result):
             task = asyncio.ensure_future(result)
+
+            def _consume_shutdown_result(done: "asyncio.Future") -> None:
+                """消费延迟收敛任务的最终异常，避免事件循环产生未取回异常。"""
+                try:
+                    done.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as err:
+                    logger.error(f"关闭{name}最终收尾失败：{err}")
+
+            task.add_done_callback(_consume_shutdown_result)
             if timeout_seconds:
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(task), timeout=timeout_seconds
                     )
                 except asyncio.TimeoutError:
-                    logger.error(f"关闭{name}超时，等待其取消收口")
+                    # 请求取消后不再阻塞等待收口：回调若不能及时响应取消，
+                    # await task 会让本函数连同超时预算一起被无限期拖住，
+                    # 后续关闭阶段随之全部停摆。最终结果交给上面的 done 回调收尾。
+                    logger.error(f"关闭{name}超时，已请求取消并保留未收敛任务")
                     task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
             else:
                 await task
     except Exception as err:
