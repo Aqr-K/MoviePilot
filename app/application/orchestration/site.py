@@ -503,7 +503,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
                 res = RequestUtils(cookies=cookie,
                                    ua=settings.USER_AGENT
                                    ).get_res(url=domain_url)
-                if res and res.status_code in [200, 500, 403]:
+                if res is not None and res.status_code in [200, 500, 403]:
                     content = res.text
                     if not indexer.get("public") and not SiteUtils.is_logged_in(content):
                         _fail_count += 1
@@ -530,7 +530,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
                                            ua=settings.USER_AGENT,
                                            proxies=settings.PROXY
                                            ).get_res(url=domain_url)
-                        if res and res.status_code in [200, 500, 403]:
+                        if res is not None and res.status_code in [200, 500, 403]:
                             if not indexer.get("public") and not SiteUtils.is_logged_in(res.text):
                                 logger.warn(f"站点 {indexer.get('name')} 登录失败，即使通过代理，无法添加站点")
                                 _fail_count += 1
