@@ -2,15 +2,18 @@
 
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
+from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.application.outbox import SqlAlchemyAsyncOutboxStager, SqlAlchemyOutboxRepository
 from app.application.subscription.write import (
     AfterCommitEffect,
     AsyncAfterCommitEffect,
     AsyncCreateSubscriptionCommand,
     CreateSubscriptionCommand,
+    subscription_added_event_key,
 )
 from app.db.oper.subscribe import SubscribeOper
 from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
@@ -41,11 +44,23 @@ class TransactionalSubscribeWriter:
         """在独占同步会话内执行一次完整订阅新增事务。"""
         session = self._sync_session()
         try:
+            outbox = SqlAlchemyOutboxRepository(session)
             command = CreateSubscriptionCommand(
                 repository=SubscribeOper(session),
                 unit_of_work=SqlAlchemyUnitOfWork(session),
+                outbox=outbox,
             )
-            return command.execute(identity, payload, username, after_commit)
+
+            def delivered(subscribe_id: int) -> None:
+                """执行旧 post-commit 编排，全部成功后收口 durable intent。"""
+                if after_commit:
+                    after_commit(subscribe_id)
+                    outbox.complete_by_event_key(
+                        subscription_added_event_key(subscribe_id, payload),
+                        datetime.now(timezone.utc),
+                    )
+
+            return command.execute(identity, payload, username, delivered)
         finally:
             session.close()
 
@@ -58,13 +73,25 @@ class TransactionalSubscribeWriter:
     ) -> tuple[int, str]:
         """在独占异步会话作用域内执行一次完整订阅新增事务。"""
         async with self._async_session() as session:
+            outbox = SqlAlchemyAsyncOutboxStager(session)
             command = AsyncCreateSubscriptionCommand(
                 repository=SubscribeOper(session),
                 unit_of_work=SqlAlchemyAsyncUnitOfWork(session),
+                outbox=outbox,
             )
+
+            async def delivered(subscribe_id: int) -> None:
+                """异步执行旧编排，全部成功后收口 durable intent。"""
+                if after_commit:
+                    await after_commit(subscribe_id)
+                    await outbox.complete_by_event_key(
+                        subscription_added_event_key(subscribe_id, payload),
+                        datetime.now(timezone.utc),
+                    )
+
             return await command.execute(
                 identity,
                 payload,
                 username,
-                after_commit,
+                delivered,
             )

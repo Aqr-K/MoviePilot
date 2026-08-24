@@ -280,6 +280,14 @@ def build_host_jobs(user_auth: Callable[[], None]) -> List[ScheduledJob]:
             manual=True,
         ),
         ScheduledJob(
+            id="outbox_dispatch",
+            name="恢复待投递副作用",
+            func=systemjobs.outbox_dispatch,
+            triggers=(
+                _interval(seconds=30, next_run_time=_now()),
+            ),
+        ),
+        ScheduledJob(
             id="data_cleanup",
             name="数据表清理",
             func=SchedulerChain().cleanup,

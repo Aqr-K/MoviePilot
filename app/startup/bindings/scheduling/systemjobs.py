@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from app.application.database import get_database_governance
 from app.application.orchestration.scheduler import SchedulerChain
+from app.application.outbox import dispatch_pending_outbox
 from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
 from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.config import settings
@@ -29,6 +30,15 @@ def clear_cache() -> None:
     广播缓存清理。
     """
     SchedulerChain().clear_cache()
+
+
+def outbox_dispatch() -> int:
+    """
+    恢复有限数量到期的持久副作用意图。
+
+    :return: 本次批次处理的消息数量
+    """
+    return dispatch_pending_outbox()
 
 
 def full_gc() -> None:

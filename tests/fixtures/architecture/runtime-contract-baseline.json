@@ -2619,6 +2619,10 @@
           {
             "caller": "app.application.orchestration.subscribe",
             "count": 2
+          },
+          {
+            "caller": "app.startup.dataports_initializer",
+            "count": 1
           }
         ]
       },
@@ -2743,7 +2747,7 @@
         ]
       }
     },
-    "producer_count": 67
+    "producer_count": 68
   },
   "module_method_specs": {
     "async_discover": {

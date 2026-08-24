@@ -21,6 +21,11 @@ from app.application.messaging.chat import (
     configure_agent_chat_service,
 )
 from app.application.orchestration.data import configure_chain_data_ports
+from app.application.outbox import (
+    OutboxDispatcher,
+    SqlAlchemyOutboxRepository,
+    configure_outbox_dispatcher,
+)
 from app.application.security.auth import (
     AuthService,
     configure_auth_identity_ports,
@@ -55,6 +60,8 @@ from app.db.oper.workflow import WorkflowOper
 from app.db.session import SessionFactory, async_session_scope, get_async_db, get_db
 from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
 from app.runtime.config import settings
+from app.runtime.events import EventManager
+from app.schemas.types import EventType
 
 
 def configure_request_data_ports() -> None:
@@ -123,10 +130,26 @@ def configure_orchestration_data_ports() -> None:
     configure_transfer_history_provider(TransferHistoryOper)
 
 
+def _build_outbox_dispatcher() -> OutboxDispatcher:
+    """创建一次恢复批次独占的 Session、Repository 和事件 handler。"""
+    session = SessionFactory()
+    return OutboxDispatcher(
+        repository=SqlAlchemyOutboxRepository(session),
+        handlers={
+            "subscribe.added": lambda message: EventManager().send_event(
+                EventType.SubscribeAdded,
+                message.payload,
+            )
+        },
+        close=session.close,
+    )
+
+
 def configure_application_service_ports() -> None:
     """登记跨请求复用的单例应用服务，供无请求会话的调用方取用。"""
     users = UserOper()
     configure_system_config(SystemConfigService(repository=SystemConfigOper()))
+    configure_outbox_dispatcher(_build_outbox_dispatcher)
     configure_transfer_retry_config(
         lambda: TransferRetryConfig(
             max_failed_retries=settings.TRANSFER_MAX_FAILED_RETRIES,
