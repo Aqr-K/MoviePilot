@@ -448,11 +448,14 @@ class SchedulerEngine:
                 running_loop = asyncio.get_running_loop()
             except RuntimeError:
                 running_loop = None
-            target_loop = global_vars.loop
             if running_loop:
                 return self._create_async_task(
                     self.__run_coro_job(coro=coro, job_id=job_id, job=job)
                 )
+            # 已确认不在运行中循环内才需要登记的主循环，此时才读取；直接读
+            # CURRENT_EVENT_LOOP 而不用 global_vars.loop 属性——后者在未设置时会
+            # 新建一个事件循环并写回全局状态，仅为判断可用性就产生副作用是不可接受的。
+            target_loop = global_vars.CURRENT_EVENT_LOOP
             if target_loop and target_loop.is_running():
                 if not getattr(self, "_accepting_async_tasks", True):
                     coro.close()
@@ -596,15 +599,19 @@ class SchedulerEngine:
             running_loop = None
         if running_loop:
             self._create_async_task(coro)
-        elif global_vars.loop and global_vars.loop.is_running():
-            if not getattr(self, "_accepting_async_tasks", True):
-                coro.close()
-                return
-            self._track_async_task(
-                asyncio.run_coroutine_threadsafe(coro, global_vars.loop)
-            )
         else:
-            asyncio.run(coro)
+            # 直接读 CURRENT_EVENT_LOOP 而不用 global_vars.loop 属性——后者在未设置时
+            # 会新建一个事件循环并写回全局状态，仅为判断可用性就产生副作用是不可接受的。
+            target_loop = global_vars.CURRENT_EVENT_LOOP
+            if target_loop and target_loop.is_running():
+                if not getattr(self, "_accepting_async_tasks", True):
+                    coro.close()
+                    return
+                self._track_async_task(
+                    asyncio.run_coroutine_threadsafe(coro, target_loop)
+                )
+            else:
+                asyncio.run(coro)
 
     def list(self) -> List[_SchemaScheduleInfo]:
         """
