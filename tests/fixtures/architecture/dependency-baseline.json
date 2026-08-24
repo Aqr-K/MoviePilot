@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7061,
-  "edge_sha256": "beb6d175332e7b0c7e5e568a57af1fdaf6832efd2af2e70c8a087d2b7b99d029",
+  "edge_count": 7062,
+  "edge_sha256": "39d86eb2a544295564d7168a3d118e8d53f1f417b7bc0372a3658dd56ef165d0",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -6826,6 +6826,7 @@
     "app.startup.modules_initializer -> app.application.database",
     "app.startup.modules_initializer -> app.application.image",
     "app.startup.modules_initializer -> app.application.messaging",
+    "app.startup.modules_initializer -> app.application.messaging.agent",
     "app.startup.modules_initializer -> app.application.messaging.gateway",
     "app.startup.modules_initializer -> app.application.messaging.message",
     "app.startup.modules_initializer -> app.application.module",
