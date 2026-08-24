@@ -30,6 +30,7 @@ from app.application.security.userconfig import (
     configure_user_configuration,
 )
 from app.application.site.query import SiteQueryService, configure_site_query_service
+from app.application.subscription.transactional import TransactionalSubscribeWriter
 from app.application.subscription.write import configure_subscribe_writer
 from app.db.oper.agentchat import AgentChatOper
 from app.db.oper.agenttask import AgentTaskOper
@@ -49,7 +50,7 @@ from app.db.oper.user import UserOper
 from app.db.oper.user_identity import UserIdentityOper
 from app.db.oper.userconfig import UserConfigOper
 from app.db.oper.workflow import WorkflowOper
-from app.db.session import get_async_db, get_db
+from app.db.session import SessionFactory, async_session_scope, get_async_db, get_db
 from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
 
 
@@ -110,7 +111,12 @@ def configure_orchestration_data_ports() -> None:
         workflow=WorkflowOper,
         plugin_data=PluginDataOper,
     )
-    configure_subscribe_writer(SubscribeOper)
+    configure_subscribe_writer(
+        lambda: TransactionalSubscribeWriter(
+            sync_session=SessionFactory,
+            async_session=async_session_scope,
+        )
+    )
     configure_transfer_history_provider(TransferHistoryOper)
 
 

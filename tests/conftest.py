@@ -34,7 +34,12 @@ def configure_plugin_system_services():
         configure_service_instance_configs,
         get_configured_service_instance_configs,
     )
-    from app.db.session import get_async_db, get_db
+    from app.db.session import (
+        SessionFactory,
+        async_session_scope,
+        get_async_db,
+        get_db,
+    )
     from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
     from app.db.oper.serviceconfig import ServiceConfigOper
     from app.db.oper.systemconfig import SystemConfigOper
@@ -51,6 +56,7 @@ def configure_plugin_system_services():
         lambda capability: get_configured_service_instance_configs().read(capability)
     )
     from app.application.orchestration.data import configure_chain_data_ports
+    from app.application.subscription.write import configure_subscribe_writer
     from app.application.plugin.runtime import configure_plugin_runtime
     from app.application.module import configure_module_runtime
     from app.application.orchestration.context import (
@@ -83,6 +89,7 @@ def configure_plugin_system_services():
     from app.db.oper.message import MessageOper
     from app.db.oper.passkey import PassKeyOper
     from app.db.oper.user_identity import UserIdentityOper
+    from app.application.subscription.transactional import TransactionalSubscribeWriter
 
     configure_api_data_ports(
         sync_session=get_db,
@@ -111,6 +118,12 @@ def configure_plugin_system_services():
             "async": SqlAlchemyAsyncUnitOfWork,
             "sync": SqlAlchemyUnitOfWork,
         },
+    )
+    configure_subscribe_writer(
+        lambda: TransactionalSubscribeWriter(
+            sync_session=SessionFactory,
+            async_session=async_session_scope,
+        )
     )
 
     from app.application.security.auth import configure_auth_identity_ports

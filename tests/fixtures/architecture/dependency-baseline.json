@@ -25,7 +25,11 @@
     "application_to_db": [
       "app.application.security.dependencies -> app.db",
       "app.application.security.dependencies -> app.db.models",
-      "app.application.security.dependencies -> app.db.models.user"
+      "app.application.security.dependencies -> app.db.models.user",
+      "app.application.subscription.transactional -> app.db",
+      "app.application.subscription.transactional -> app.db.oper",
+      "app.application.subscription.transactional -> app.db.oper.subscribe",
+      "app.application.subscription.transactional -> app.db.uow"
     ],
     "chain_to_db": [],
     "modules_to_db": [
@@ -63,8 +67,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 6873,
-  "edge_sha256": "57c69d7a2de244c0206137534f00031cace0bf86004b7b5ee7ff75a321adf1b9",
+  "edge_count": 6881,
+  "edge_sha256": "6f623494365bfcfe1b6b1e9dc85a23cbab2a9c9eccd1c68fba660cb9fba06a08",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3423,6 +3427,13 @@
     "app.application.subscription.search -> app.application",
     "app.application.subscription.search -> app.application.subscription",
     "app.application.subscription.search -> app.application.subscription.delete",
+    "app.application.subscription.transactional -> app.application",
+    "app.application.subscription.transactional -> app.application.subscription",
+    "app.application.subscription.transactional -> app.application.subscription.write",
+    "app.application.subscription.transactional -> app.db",
+    "app.application.subscription.transactional -> app.db.oper",
+    "app.application.subscription.transactional -> app.db.oper.subscribe",
+    "app.application.subscription.transactional -> app.db.uow",
     "app.application.subscription.write -> app.domain",
     "app.application.subscription.write -> app.domain.context",
     "app.application.subscription.write -> app.schemas",
@@ -6492,6 +6503,7 @@
     "app.startup.dataports_initializer -> app.application.site",
     "app.startup.dataports_initializer -> app.application.site.query",
     "app.startup.dataports_initializer -> app.application.subscription",
+    "app.startup.dataports_initializer -> app.application.subscription.transactional",
     "app.startup.dataports_initializer -> app.application.subscription.write",
     "app.startup.dataports_initializer -> app.db",
     "app.startup.dataports_initializer -> app.db.oper",
@@ -6940,7 +6952,7 @@
     "app.workflow.service -> app.schemas.workflow",
     "app.workflow.service -> app.workflow"
   ],
-  "module_count": 869,
+  "module_count": 870,
   "modules": [
     "app",
     "app.adapters",
@@ -7306,6 +7318,7 @@
     "app.application.subscription.mutation",
     "app.application.subscription.query",
     "app.application.subscription.search",
+    "app.application.subscription.transactional",
     "app.application.subscription.write",
     "app.application.torrent",
     "app.application.transfer",
