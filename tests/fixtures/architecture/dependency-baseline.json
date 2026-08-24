@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7058,
-  "edge_sha256": "b8e0f34ee72e7e88e96169d652a87524550dddaf5840b9fd8a48473ef4fd4b1f",
+  "edge_count": 7061,
+  "edge_sha256": "beb6d175332e7b0c7e5e568a57af1fdaf6832efd2af2e70c8a087d2b7b99d029",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3190,6 +3190,7 @@
     "app.application.orchestration.subscribe -> app.application.configuration",
     "app.application.orchestration.subscribe -> app.application.mediaserver",
     "app.application.orchestration.subscribe -> app.application.messaging",
+    "app.application.orchestration.subscribe -> app.application.messaging.message",
     "app.application.orchestration.subscribe -> app.application.messaging.subscribe",
     "app.application.orchestration.subscribe -> app.application.orchestration",
     "app.application.orchestration.subscribe -> app.application.orchestration._interaction",
@@ -6664,6 +6665,7 @@
     "app.startup.dataports_initializer -> app.application.history",
     "app.startup.dataports_initializer -> app.application.messaging",
     "app.startup.dataports_initializer -> app.application.messaging.chat",
+    "app.startup.dataports_initializer -> app.application.messaging.gateway",
     "app.startup.dataports_initializer -> app.application.orchestration",
     "app.startup.dataports_initializer -> app.application.orchestration.data",
     "app.startup.dataports_initializer -> app.application.orchestration.durable_events",
@@ -6709,6 +6711,7 @@
     "app.startup.dataports_initializer -> app.runtime.events",
     "app.startup.dataports_initializer -> app.runtime.observability",
     "app.startup.dataports_initializer -> app.schemas",
+    "app.startup.dataports_initializer -> app.schemas.message",
     "app.startup.dataports_initializer -> app.schemas.types",
     "app.startup.domain_initializer -> app.adapters",
     "app.startup.domain_initializer -> app.adapters.system",
