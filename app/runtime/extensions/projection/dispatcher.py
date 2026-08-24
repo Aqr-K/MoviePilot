@@ -17,6 +17,7 @@ from app.runtime.extensions.lifecycle.host_module_adapter import HostModuleProvi
 from app.runtime.extensions.contract.module_method import (
     diagnose_module_callable,
     get_module_method_contract,
+    is_explicit_module_method,
 )
 from app.runtime.extensions.projection.plugin import PluginProviderSource
 from app.runtime.log import logger
@@ -312,6 +313,7 @@ class ModuleInvocationDispatcher:
         """
         try:
             self._announce_invocation(provider, method)
+            self._record_legacy_hit(method, provider)
             self._diagnose_callable(method, provider.invoke, provider.display_name)
             return provider.invoke(*args, **kwargs)
         except RateLimitExceededException as err:
@@ -337,6 +339,7 @@ class ModuleInvocationDispatcher:
         """
         try:
             self._announce_invocation(provider, method)
+            self._record_legacy_hit(method, provider)
             self._diagnose_callable(method, provider.invoke, provider.display_name)
             return await self._async_call(provider.invoke, *args, **kwargs)
         except RateLimitExceededException as err:
@@ -365,6 +368,7 @@ class ModuleInvocationDispatcher:
         for provider in providers:
             try:
                 self._announce_invocation(provider, method)
+                self._record_legacy_hit(method, provider)
                 self._diagnose_callable(method, provider.invoke, provider.display_name)
                 if self.is_valid_empty(result):
                     result = provider.invoke(*args, **kwargs)
@@ -405,6 +409,7 @@ class ModuleInvocationDispatcher:
         for provider in providers:
             try:
                 self._announce_invocation(provider, method)
+                self._record_legacy_hit(method, provider)
                 self._diagnose_callable(method, provider.invoke, provider.display_name)
                 if self.is_valid_empty(result):
                     result = await self._async_call(provider.invoke, *args, **kwargs)
@@ -499,6 +504,22 @@ class ModuleInvocationDispatcher:
             provider.extension_id,
             method,
             **kwargs,
+        )
+
+    @staticmethod
+    def _record_legacy_hit(method: str, provider: ExtensionProvider) -> None:
+        """记录未进入显式能力族契约的方法命中，标注调用来源，便于逐项迁移。"""
+        if is_explicit_module_method(method):
+            return
+        if provider.fault_scope is ExtensionFaultScope.PLUGIN:
+            caller_type, abi_source = "plugin", "third_party_plugin"
+        else:
+            caller_type, abi_source = "system", "host_module"
+        record_metric(
+            "module.contract.legacy_hit",
+            method=method,
+            caller_type=caller_type,
+            abi_source=abi_source,
         )
 
     @staticmethod
