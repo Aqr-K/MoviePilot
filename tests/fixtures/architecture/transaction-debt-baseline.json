@@ -1,43 +1,13 @@
 {
   "model_decorators": {
     "by_kind": {
-      "async_db_query": 16,
+      "async_db_query": 14,
       "async_db_update": 5,
-      "db_query": 26,
+      "db_query": 22,
       "db_update": 12
     },
-    "count": 59,
+    "count": 53,
     "methods": [
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/agentchat.py",
-        "method": "AgentChat.async_get_by_session"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/agentchat.py",
-        "method": "AgentChat.async_list_by_page"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/agentchat.py",
-        "method": "AgentChat.get_by_session"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/agentchat.py",
-        "method": "AgentChat.list_by_page"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/agenttaskrun.py",
-        "method": "AgentTaskRun.get_by_run_id"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/agenttaskrun.py",
-        "method": "AgentTaskRun.list_for_task"
-      },
       {
         "decorator": "db_query",
         "file": "app/db/models/downloadfailure.py",
