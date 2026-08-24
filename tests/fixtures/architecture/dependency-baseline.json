@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7081,
-  "edge_sha256": "e65ac0ac25461d29983728859c06306c485f99ed62b29dce9d0b304b393a5325",
+  "edge_count": 7083,
+  "edge_sha256": "180c7953fda595ed101d53401e51807543d90604ab7d9b72b03ee210d94a5a3c",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -1795,6 +1795,7 @@
     "app.api.endpoints.history -> app.agent.prompt.transfer_redo",
     "app.api.endpoints.history -> app.agent.runtime_loader",
     "app.api.endpoints.history -> app.api",
+    "app.api.endpoints.history -> app.api.context",
     "app.api.endpoints.history -> app.api.deps",
     "app.api.endpoints.history -> app.api.response",
     "app.api.endpoints.history -> app.application",
@@ -1803,6 +1804,7 @@
     "app.api.endpoints.history -> app.runtime.config",
     "app.api.endpoints.history -> app.runtime.log",
     "app.api.endpoints.history -> app.runtime.progress",
+    "app.api.endpoints.history -> app.runtime.tasks",
     "app.api.endpoints.history -> app.schemas",
     "app.api.endpoints.history -> app.schemas.common",
     "app.api.endpoints.history -> app.schemas.history",
