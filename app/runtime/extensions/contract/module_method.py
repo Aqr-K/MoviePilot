@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any, Protocol
 
 
 class ModuleResultAggregation(StrEnum):
@@ -11,14 +14,43 @@ class ModuleResultAggregation(StrEnum):
 
     LEGACY = "legacy"
     PIPELINE = "pipeline"
+    FIRST_NON_EMPTY = "first_non_empty"
+    ORDERED_LIST_MERGE = "ordered_list_merge"
+
+
+class ModuleExecutionMode(StrEnum):
+    """描述 provider 可以采用的执行形态。"""
+
+    SYNC_OR_ASYNC = "sync_or_async"
+
+
+class ModuleErrorPolicy(StrEnum):
+    """描述单个 provider 失败后的兼容处理策略。"""
+
+    ISOLATE_PROVIDER = "isolate_provider"
+
+
+class ModuleCapability(Protocol):
+    """宿主和新插件可用于声明动态能力的最小 Protocol。"""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """执行模块能力并返回契约声明的结果。"""
 
 
 @dataclass(frozen=True, slots=True)
 class ModuleMethodContract:
-    """记录一个模块方法族的调用模式和结果规则。"""
+    """记录模块方法的输入、结果、执行与兼容错误协议。"""
 
     family: str
     aggregation: ModuleResultAggregation = ModuleResultAggregation.LEGACY
+    version: int = 1
+    input_contract: str = "legacy_args"
+    result_contract: str = "Any"
+    required_parameters: tuple[str, ...] = ()
+    execution: ModuleExecutionMode = ModuleExecutionMode.SYNC_OR_ASYNC
+    timeout_policy: str = "caller_budget"
+    error_policy: ModuleErrorPolicy = ModuleErrorPolicy.ISOLATE_PROVIDER
+    public_to_plugins: bool = True
     supports_sync: bool = True
     supports_async: bool = True
     plugin_short_circuit: bool = True
@@ -237,53 +269,133 @@ _MULTI_SOURCE_CONTRACTS = {
 # 首批登记高频能力族。方法名仍保持开放字符串，以兼容第三方插件自定义模块能力；
 # 未命中项继续使用冻结的 legacy 规则，并由架构快照记录新增调用位置。
 _METHOD_CONTRACTS = {
-    "recognize_media": ModuleMethodContract(family="media-recognition"),
-    "search_medias": ModuleMethodContract(family="media-recognition"),
+    "recognize_media": ModuleMethodContract(
+        family="media-recognition", input_contract="MediaRecognitionRequest",
+        result_contract="MediaInfo | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "search_medias": ModuleMethodContract(
+        family="media-recognition", input_contract="MediaSearchRequest",
+        result_contract="list[MediaInfo]", aggregation=ModuleResultAggregation.ORDERED_LIST_MERGE,
+    ),
     "obtain_images": ModuleMethodContract(
-        family="media-recognition", aggregation=ModuleResultAggregation.PIPELINE
+        family="media-recognition", input_contract="MediaInfo",
+        result_contract="MediaInfo | None", aggregation=ModuleResultAggregation.PIPELINE,
     ),
     "async_obtain_images": ModuleMethodContract(
-        family="media-recognition", aggregation=ModuleResultAggregation.PIPELINE
+        family="media-recognition", input_contract="MediaInfo",
+        result_contract="MediaInfo | None", aggregation=ModuleResultAggregation.PIPELINE,
     ),
-    "media_category": ModuleMethodContract(family="media-recognition"),
-    "media_exists": ModuleMethodContract(family="media-library"),
-    "match_media": ModuleMethodContract(family="media-metadata"),
-    "async_match_media": ModuleMethodContract(family="media-metadata"),
-    "person_detail": ModuleMethodContract(family="media-metadata"),
-    "async_person_detail": ModuleMethodContract(family="media-metadata"),
-    "person_credits": ModuleMethodContract(family="media-metadata"),
-    "async_person_credits": ModuleMethodContract(family="media-metadata"),
-    "media_credits": ModuleMethodContract(family="media-metadata"),
-    "async_media_credits": ModuleMethodContract(family="media-metadata"),
-    "media_recommend": ModuleMethodContract(family="media-metadata"),
-    "async_media_recommend": ModuleMethodContract(family="media-metadata"),
-    "media_similar": ModuleMethodContract(family="media-metadata"),
-    "async_media_similar": ModuleMethodContract(family="media-metadata"),
-    "media_detail": ModuleMethodContract(family="media-metadata"),
-    "async_media_detail": ModuleMethodContract(family="media-metadata"),
-    "discover": ModuleMethodContract(family="media-discovery"),
-    "async_discover": ModuleMethodContract(family="media-discovery"),
-    "discover_board": ModuleMethodContract(family="media-discovery"),
-    "async_discover_board": ModuleMethodContract(family="media-discovery"),
-    "media_files": ModuleMethodContract(family="media-library"),
-    "mediaserver_items": ModuleMethodContract(family="media-server"),
-    "mediaserver_iteminfo": ModuleMethodContract(family="media-server"),
-    "mediaserver_play_url": ModuleMethodContract(family="media-server"),
-    "mediaserver_tv_episodes": ModuleMethodContract(family="media-server"),
-    "download_file": ModuleMethodContract(family="storage"),
-    "upload_file": ModuleMethodContract(family="storage"),
-    "list_files": ModuleMethodContract(family="storage"),
-    "get_file_item": ModuleMethodContract(family="storage"),
-    "get_folder": ModuleMethodContract(family="storage"),
-    "get_parent_item": ModuleMethodContract(family="storage"),
-    "rename_file": ModuleMethodContract(family="storage"),
-    "storage_manage": ModuleMethodContract(family="storage"),
-    "snapshot_storage": ModuleMethodContract(family="storage"),
-    "send_message": ModuleMethodContract(family="messaging"),
-    "finalize_message": ModuleMethodContract(family="messaging"),
-    "register_commands": ModuleMethodContract(family="messaging"),
-    "scheduler_job": ModuleMethodContract(family="scheduling"),
-    "webhook_parser": ModuleMethodContract(family="integration"),
+    "media_category": ModuleMethodContract(
+        family="media-recognition", input_contract="MediaCategoryRequest",
+        result_contract="CategoryConfig | None",
+    ),
+    "media_exists": ModuleMethodContract(
+        family="media-library",
+        input_contract="mediainfo, itemid=None, server=None",
+        result_contract="ExistMediaInfo | None",
+    ),
+    "match_media": ModuleMethodContract(
+        family="media-metadata",
+        input_contract="source, name=None, mtype=None, year=None, season=None, imdbid=None",
+        result_contract="dict | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_match_media": ModuleMethodContract(
+        family="media-metadata",
+        input_contract="source, name=None, mtype=None, year=None, season=None, imdbid=None",
+        result_contract="dict | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "person_detail": ModuleMethodContract(
+        family="media-metadata", input_contract="source, person_id=None",
+        result_contract="MediaPerson | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_person_detail": ModuleMethodContract(
+        family="media-metadata", input_contract="source, person_id=None",
+        result_contract="MediaPerson | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "person_credits": ModuleMethodContract(
+        family="media-metadata", input_contract="source, person_id=None, page=1, count=None",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_person_credits": ModuleMethodContract(
+        family="media-metadata", input_contract="source, person_id=None, page=1, count=None",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "media_credits": ModuleMethodContract(
+        family="media-metadata",
+        input_contract="source, media_id=None, mtype=None, page=1, count=None",
+        result_contract="list[MediaPerson] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_media_credits": ModuleMethodContract(
+        family="media-metadata",
+        input_contract="source, media_id=None, mtype=None, page=1, count=None",
+        result_contract="list[MediaPerson] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "media_recommend": ModuleMethodContract(
+        family="media-metadata",
+        input_contract="source, media_id=None, mtype=None, page=1, count=None",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_media_recommend": ModuleMethodContract(
+        family="media-metadata",
+        input_contract="source, media_id=None, mtype=None, page=1, count=None",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "media_similar": ModuleMethodContract(
+        family="media-metadata", input_contract="source, media_id=None, mtype=None",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_media_similar": ModuleMethodContract(
+        family="media-metadata", input_contract="source, media_id=None, mtype=None",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "media_detail": ModuleMethodContract(
+        family="media-metadata",
+        input_contract="source, media_id=None, mtype=None, season=None",
+        result_contract="dict | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_media_detail": ModuleMethodContract(
+        family="media-metadata",
+        input_contract="source, media_id=None, mtype=None, season=None",
+        result_contract="dict | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "discover": ModuleMethodContract(
+        family="media-discovery", input_contract="source, **criteria",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_discover": ModuleMethodContract(
+        family="media-discovery", input_contract="source, **criteria",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "discover_board": ModuleMethodContract(
+        family="media-discovery", input_contract="source, board=None, page=1, count=30",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "async_discover_board": ModuleMethodContract(
+        family="media-discovery", input_contract="source, board=None, page=1, count=30",
+        result_contract="list[MediaInfo] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+    ),
+    "media_files": ModuleMethodContract(
+        family="media-library", input_contract="mediainfo",
+        result_contract="list[FileItem] | None",
+    ),
+    "mediaserver_items": ModuleMethodContract(family="media-server", input_contract="MediaServerItemsRequest", result_contract="list[MediaServerItem]", aggregation=ModuleResultAggregation.ORDERED_LIST_MERGE),
+    "mediaserver_iteminfo": ModuleMethodContract(family="media-server", input_contract="MediaServerItemRequest", result_contract="MediaServerItem | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "mediaserver_play_url": ModuleMethodContract(family="media-server", input_contract="MediaServerPlayRequest", result_contract="str | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "mediaserver_tv_episodes": ModuleMethodContract(family="media-server", input_contract="MediaServerEpisodesRequest", result_contract="list[MediaServerPlayItem]", aggregation=ModuleResultAggregation.ORDERED_LIST_MERGE),
+    "download_file": ModuleMethodContract(family="storage", input_contract="StorageDownloadRequest", result_contract="FileItem | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "upload_file": ModuleMethodContract(family="storage", input_contract="StorageUploadRequest", result_contract="FileItem | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "list_files": ModuleMethodContract(family="storage", input_contract="StorageListRequest", result_contract="list[FileItem]", aggregation=ModuleResultAggregation.ORDERED_LIST_MERGE),
+    "get_file_item": ModuleMethodContract(family="storage", input_contract="StorageItemRequest", result_contract="FileItem | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "get_folder": ModuleMethodContract(family="storage", input_contract="StorageFolderRequest", result_contract="FileItem | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "get_parent_item": ModuleMethodContract(family="storage", input_contract="StorageParentRequest", result_contract="FileItem | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "rename_file": ModuleMethodContract(family="storage", input_contract="StorageRenameRequest", result_contract="bool | FileItem", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "storage_manage": ModuleMethodContract(family="storage", input_contract="StorageManageRequest", result_contract="Any", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "snapshot_storage": ModuleMethodContract(family="storage", input_contract="StorageSnapshotRequest", result_contract="dict[str, dict] | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "send_message": ModuleMethodContract(family="messaging", input_contract="MessageSendRequest", result_contract="Message | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "finalize_message": ModuleMethodContract(family="messaging", input_contract="MessageFinalizeRequest", result_contract="Message | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
+    "register_commands": ModuleMethodContract(family="messaging", input_contract="CommandRegistrationRequest", result_contract="None"),
+    "scheduler_job": ModuleMethodContract(family="scheduling", input_contract="SchedulerJobRequest", result_contract="None"),
+    "webhook_parser": ModuleMethodContract(family="integration", input_contract="WebhookRequest", result_contract="WebhookEventInfo | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY),
 }
 
 _PREFIX_CONTRACTS = (
@@ -310,3 +422,29 @@ def get_multi_source_contract(method: str) -> MultiSourceCapabilityContract | No
 def is_explicit_module_method(method: str) -> bool:
     """判断方法是否已进入首批显式能力族清单。"""
     return get_module_method_contract(method) is not _DEFAULT_CONTRACT
+
+
+def diagnose_module_callable(method: str, callback: Callable[..., Any]) -> tuple[str, ...]:
+    """诊断显式能力的基础签名；兼容阶段只返回问题，不拒绝 provider。"""
+    contract = get_module_method_contract(method)
+    if contract is _DEFAULT_CONTRACT:
+        return ()
+    try:
+        parameters = inspect.signature(callback).parameters
+    except (TypeError, ValueError):
+        return ("signature-unavailable",)
+    missing = tuple(
+        name
+        for name in contract.required_parameters
+        if name not in parameters
+        and not any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+    )
+    return tuple(f"missing-parameter:{name}" for name in missing)
+
+
+def list_explicit_module_contracts() -> dict[str, ModuleMethodContract]:
+    """返回显式方法清单的副本，供架构基线和 SDK 文档使用。"""
+    return dict(_METHOD_CONTRACTS)

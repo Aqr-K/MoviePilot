@@ -14,7 +14,10 @@ from app.runtime.extensions.contract.extension import (
     ExtensionProviderSource,
 )
 from app.runtime.extensions.lifecycle.host_module_adapter import HostModuleProviderSource
-from app.runtime.extensions.contract.module_method import get_module_method_contract
+from app.runtime.extensions.contract.module_method import (
+    diagnose_module_callable,
+    get_module_method_contract,
+)
 from app.runtime.extensions.projection.plugin import PluginProviderSource
 from app.runtime.log import logger
 from app.schemas.exception import RateLimitExceededException
@@ -293,6 +296,7 @@ class ModuleInvocationDispatcher:
         """
         try:
             self._announce_invocation(provider, method)
+            self._diagnose_callable(method, provider.invoke, provider.display_name)
             return provider.invoke(*args, **kwargs)
         except RateLimitExceededException as err:
             self._report_rate_limit(provider, method, err, **kwargs)
@@ -317,6 +321,7 @@ class ModuleInvocationDispatcher:
         """
         try:
             self._announce_invocation(provider, method)
+            self._diagnose_callable(method, provider.invoke, provider.display_name)
             return await self._async_call(provider.invoke, *args, **kwargs)
         except RateLimitExceededException as err:
             self._report_rate_limit(provider, method, err, **kwargs)
@@ -344,6 +349,7 @@ class ModuleInvocationDispatcher:
         for provider in providers:
             try:
                 self._announce_invocation(provider, method)
+                self._diagnose_callable(method, provider.invoke, provider.display_name)
                 if self.is_valid_empty(result):
                     result = provider.invoke(*args, **kwargs)
                 elif provider.relays_result and ObjectUtils.check_signature(
@@ -383,6 +389,7 @@ class ModuleInvocationDispatcher:
         for provider in providers:
             try:
                 self._announce_invocation(provider, method)
+                self._diagnose_callable(method, provider.invoke, provider.display_name)
                 if self.is_valid_empty(result):
                     result = await self._async_call(provider.invoke, *args, **kwargs)
                 elif provider.relays_result and ObjectUtils.check_signature(
@@ -458,6 +465,22 @@ class ModuleInvocationDispatcher:
             method,
             **kwargs,
         )
+
+    @staticmethod
+    def _diagnose_callable(
+        method: str,
+        callback: Callable[..., Any],
+        owner: str,
+    ) -> None:
+        """记录 Contract V2 签名偏差，兼容阶段不阻断旧插件执行。"""
+        problems = diagnose_module_callable(method, callback)
+        if problems:
+            logger.warning(
+                "%s 的模块方法 %s 与契约不一致：%s；当前仅诊断",
+                owner,
+                method,
+                ", ".join(problems),
+            )
 
     async def _async_call(
         self,
