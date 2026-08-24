@@ -96,11 +96,14 @@ def configure_plugin_system_services():
     from app.db.oper.transferhistory import TransferHistoryOper
     from app.db.oper.transferpending import TransferPendingOper
     from app.db.oper.user import UserOper
-    from app.db.oper.workflow import WorkflowOper
+    from app.db.oper.workflow import WorkflowOper, configure_workflow_legacy_writer
     from app.db.oper.message import MessageOper
     from app.db.oper.passkey import PassKeyOper
     from app.db.oper.user_identity import UserIdentityOper
     from app.application.subscription.transactional import TransactionalSubscribeWriter
+    from app.application.workflow_transactional import (
+        TransactionalWorkflowExecutionService,
+    )
 
     configure_api_data_ports(
         sync_session=get_db,
@@ -134,6 +137,9 @@ def configure_plugin_system_services():
             sync_session=SessionFactory,
             async_session=async_session_scope,
         )
+    )
+    configure_workflow_legacy_writer(
+        TransactionalWorkflowExecutionService(SessionFactory)
     )
 
     from app.application.security.auth import configure_auth_identity_ports

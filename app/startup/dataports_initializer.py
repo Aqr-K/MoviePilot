@@ -54,6 +54,7 @@ from app.application.subscription.mutation import (
 )
 from app.application.subscription.transactional import TransactionalSubscribeWriter
 from app.application.subscription.write import configure_subscribe_writer
+from app.application.workflow_transactional import TransactionalWorkflowExecutionService
 from app.adapters.external.server import MoviePilotServerHelper
 from app.db.oper.agentchat import AgentChatOper
 from app.db.oper.agenttask import AgentTaskOper
@@ -72,7 +73,7 @@ from app.db.oper.transferpending import TransferPendingOper
 from app.db.oper.user import UserOper
 from app.db.oper.user_identity import UserIdentityOper
 from app.db.oper.userconfig import UserConfigOper
-from app.db.oper.workflow import WorkflowOper
+from app.db.oper.workflow import WorkflowOper, configure_workflow_legacy_writer
 from app.db.session import SessionFactory, async_session_scope, get_async_db, get_db
 from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
 from app.runtime.config import settings
@@ -148,6 +149,9 @@ def configure_orchestration_data_ports() -> None:
     )
     configure_transfer_history_provider(TransferHistoryOper)
     configure_transactional_subscription_scopes()
+    configure_workflow_legacy_writer(
+        TransactionalWorkflowExecutionService(SessionFactory)
+    )
 
 
 async def _publish_subscribe_modified(payload: dict) -> None:

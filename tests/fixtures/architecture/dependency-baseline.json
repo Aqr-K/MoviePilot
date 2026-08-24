@@ -38,7 +38,11 @@
       "app.application.subscription.transactional -> app.db",
       "app.application.subscription.transactional -> app.db.oper",
       "app.application.subscription.transactional -> app.db.oper.subscribe",
-      "app.application.subscription.transactional -> app.db.uow"
+      "app.application.subscription.transactional -> app.db.uow",
+      "app.application.workflow_transactional -> app.db",
+      "app.application.workflow_transactional -> app.db.oper",
+      "app.application.workflow_transactional -> app.db.oper.workflow",
+      "app.application.workflow_transactional -> app.db.uow"
     ],
     "chain_to_db": [],
     "modules_to_db": [
@@ -76,8 +80,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7027,
-  "edge_sha256": "091a69abd6aa992063d0bc8e00091332cf49adc594504267b9d5a24a6ea87406",
+  "edge_count": 7034,
+  "edge_sha256": "668714dd60228638aef384ddcd69fcae25e2488ecdd607f145313825ec763bc9",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3588,6 +3592,12 @@
     "app.application.transferhandler -> app.schemas.transfer",
     "app.application.transferhandler -> app.schemas.types",
     "app.application.transferhandler -> app.schemas.workflow",
+    "app.application.workflow_transactional -> app.application",
+    "app.application.workflow_transactional -> app.application.workflow",
+    "app.application.workflow_transactional -> app.db",
+    "app.application.workflow_transactional -> app.db.oper",
+    "app.application.workflow_transactional -> app.db.oper.workflow",
+    "app.application.workflow_transactional -> app.db.uow",
     "app.cli -> app.application",
     "app.cli -> app.application.backup",
     "app.cli -> app.doctor",
@@ -6645,6 +6655,7 @@
     "app.startup.dataports_initializer -> app.application.subscription.mutation",
     "app.startup.dataports_initializer -> app.application.subscription.transactional",
     "app.startup.dataports_initializer -> app.application.subscription.write",
+    "app.startup.dataports_initializer -> app.application.workflow_transactional",
     "app.startup.dataports_initializer -> app.db",
     "app.startup.dataports_initializer -> app.db.oper",
     "app.startup.dataports_initializer -> app.db.oper.agentchat",
@@ -7107,7 +7118,7 @@
     "app.workflow.service -> app.schemas.workflow",
     "app.workflow.service -> app.workflow"
   ],
-  "module_count": 889,
+  "module_count": 890,
   "modules": [
     "app",
     "app.adapters",
@@ -7489,6 +7500,7 @@
     "app.application.transfer",
     "app.application.transferhandler",
     "app.application.workflow",
+    "app.application.workflow_transactional",
     "app.cli",
     "app.command",
     "app.db",
