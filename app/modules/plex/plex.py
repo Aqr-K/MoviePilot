@@ -92,9 +92,11 @@ class Plex:
         return None
 
     @cached(maxsize=32, ttl=86400)
-    def __get_library_images(self, library_key: str, mtype: int) -> Optional[List[str]]:
+    def __get_library_images(self, server_key: str, library_key: str, mtype: int) -> Optional[List[str]]:
         """
         获取媒体服务器最近添加的媒体的图片列表
+        param: server_key 服务器唯一标识（host），缓存装饰器剥离self，
+            必须显式携带该标识以区分多台Plex服务器，避免library_key相同时互相返回对方的图片
         param: library_key
         param: type type的含义: 1 电影 2 剧集 详见 plexapi/utils.py中SEARCHTYPES的定义
         """
@@ -147,13 +149,13 @@ class Plex:
                 continue
             if library.type == "movie":
                 library_type = MediaType.MOVIE.value
-                image_list = self.__get_library_images(library.key, 1)
+                image_list = self.__get_library_images(self._host, library.key, 1)
             elif library.type == "show":
                 library_type = MediaType.TV.value
-                image_list = self.__get_library_images(library.key, 2)
+                image_list = self.__get_library_images(self._host, library.key, 2)
             elif library.type in ("artist", "music"):
                 library_type = MediaType.MUSIC.value
-                image_list = self.__get_library_images(library.key, 8)
+                image_list = self.__get_library_images(self._host, library.key, 8)
             else:
                 continue
             libraries.append(

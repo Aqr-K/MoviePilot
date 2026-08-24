@@ -537,15 +537,15 @@ class SubscribeChainTest(TestCase):
     def test_match_title_fallback_calls_torrent_match_from_class(self):
         """确保标题兜底匹配不依赖 TorrentHelper 实例绑定。"""
 
-        class _ReachedTitleMatch(Exception):
-            """标记测试已经进入标题匹配函数体。"""
+        reached_title_match = []
 
         class _PlainTorrentHelper:
             """模拟需要按类调用的 TorrentHelper 形态。"""
 
             def match_torrent(mediainfo, torrent_meta, torrent):
-                """标记类级调用已经正确进入匹配逻辑。"""
-                raise _ReachedTitleMatch
+                """记录类级调用已经正确进入标题匹配逻辑。"""
+                reached_title_match.append(True)
+                return False
 
             def filter_torrent(self, *args, **kwargs):
                 """保持订阅匹配后续过滤流程可继续执行。"""
@@ -596,8 +596,10 @@ class SubscribeChainTest(TestCase):
             SUBSCRIBE_CHAIN_MODULE,
             "TorrentHelper",
             _PlainTorrentHelper,
-        ), _patch_media_recognize(SUBSCRIBE_CHAIN_MODULE, mediainfo), self.assertRaises(_ReachedTitleMatch):
+        ), _patch_media_recognize(SUBSCRIBE_CHAIN_MODULE, mediainfo):
             chain.match({"test.example": [context]})
+
+        self.assertEqual(reached_title_match, [True])
 
     def test_match_accepts_special_season_zero_candidate(self):
         """S0 订阅应允许 S00 候选资源进入下载候选，不能按未指定季处理。"""

@@ -150,7 +150,11 @@ class SiteChain(InteractionChainMixin, ChainBase):
                         "current": site.get("id"),
                     },
                 )
-            userdata = self.refresh_userdata(site)
+            try:
+                userdata = self.refresh_userdata(site)
+            except Exception as e:
+                logger.error(f"站点 {site.get('name')} 刷新用户数据失败：{e}", exc_info=True)
+                userdata = None
             if userdata:
                 any_site_updated = True
                 result[site.get("name")] = userdata
@@ -461,112 +465,116 @@ class SiteChain(InteractionChainMixin, ChainBase):
                     },
                 )
 
-            # 索引器信息
-            indexer = siteshelper.get_indexer(domain)
-            # 数据库的站点信息
-            site_info = siteoper.get_by_domain(domain)
-            if site_info and site_info.is_active:
-                # 站点已存在，检查站点连通性
-                status, msg = self.test(domain)
-                # 更新站点Cookie
-                if status:
-                    logger.info(f"站点【{site_info.name}】连通性正常，不同步CookieCloud数据")
-                    # 更新站点rss地址
-                    if not site_info.public and not site_info.rss:
-                        # 自动生成rss地址
-                        rss_url, errmsg = rsshelper.get_rss_link(
-                            url=site_info.url,
-                            cookie=cookie,
-                            ua=site_info.ua or settings.USER_AGENT,
-                            proxy=True if site_info.proxy else False,
-                            timeout=site_info.timeout or 15
-                        )
-                        if rss_url:
-                            logger.info(f"更新站点 {domain} RSS地址 ...")
-                            siteoper.update_rss(domain=domain, rss=rss_url)
-                        else:
-                            logger.warn(errmsg)
-                    continue
-                # 更新站点Cookie
-                logger.info(f"更新站点 {domain} Cookie ...")
-                siteoper.update_cookie(domain=domain, cookies=cookie)
-                _update_count += 1
-            elif indexer:
-                if settings.COOKIECLOUD_BLACKLIST and any(
-                        site_rules.extract_domain(domain) == site_rules.extract_domain(black_domain) for black_domain
-                        in str(settings.COOKIECLOUD_BLACKLIST).split(",")):
-                    logger.warn(f"站点 {domain} 已在黑名单中，不添加站点")
-                    continue
-                # 新增站点
-                domain_url = __indexer_domain(inx=indexer, sub_domain=domain)
-                proxy = False
-                res = RequestUtils(cookies=cookie,
-                                   ua=settings.USER_AGENT
-                                   ).get_res(url=domain_url)
-                if res and res.status_code in [200, 500, 403]:
-                    content = res.text
-                    if not indexer.get("public") and not SiteUtils.is_logged_in(content):
-                        _fail_count += 1
-                        if under_challenge(content):
-                            logger.warn(f"站点 {indexer.get('name')} 被Cloudflare防护，无法登录，无法添加站点")
-                            continue
-                        logger.warn(
-                            f"站点 {indexer.get('name')} 登录失败，没有该站点账号或Cookie已失效，无法添加站点")
+            try:
+                # 索引器信息
+                indexer = siteshelper.get_indexer(domain)
+                # 数据库的站点信息
+                site_info = siteoper.get_by_domain(domain)
+                if site_info and site_info.is_active:
+                    # 站点已存在，检查站点连通性
+                    status, msg = self.test(domain)
+                    # 更新站点Cookie
+                    if status:
+                        logger.info(f"站点【{site_info.name}】连通性正常，不同步CookieCloud数据")
+                        # 更新站点rss地址
+                        if not site_info.public and not site_info.rss:
+                            # 自动生成rss地址
+                            rss_url, errmsg = rsshelper.get_rss_link(
+                                url=site_info.url,
+                                cookie=cookie,
+                                ua=site_info.ua or settings.USER_AGENT,
+                                proxy=True if site_info.proxy else False,
+                                timeout=site_info.timeout or 15
+                            )
+                            if rss_url:
+                                logger.info(f"更新站点 {domain} RSS地址 ...")
+                                siteoper.update_rss(domain=domain, rss=rss_url)
+                            else:
+                                logger.warn(errmsg)
                         continue
-                elif res is not None:
-                    _fail_count += 1
-                    logger.warn(f"站点 {indexer.get('name')} 连接状态码：{res.status_code}，无法添加站点")
-                    continue
-                else:
-                    if not settings.PROXY_HOST:
+                    # 更新站点Cookie
+                    logger.info(f"更新站点 {domain} Cookie ...")
+                    siteoper.update_cookie(domain=domain, cookies=cookie)
+                    _update_count += 1
+                elif indexer:
+                    if settings.COOKIECLOUD_BLACKLIST and any(
+                            site_rules.extract_domain(domain) == site_rules.extract_domain(black_domain) for black_domain
+                            in str(settings.COOKIECLOUD_BLACKLIST).split(",")):
+                        logger.warn(f"站点 {domain} 已在黑名单中，不添加站点")
+                        continue
+                    # 新增站点
+                    domain_url = __indexer_domain(inx=indexer, sub_domain=domain)
+                    proxy = False
+                    res = RequestUtils(cookies=cookie,
+                                       ua=settings.USER_AGENT
+                                       ).get_res(url=domain_url)
+                    if res and res.status_code in [200, 500, 403]:
+                        content = res.text
+                        if not indexer.get("public") and not SiteUtils.is_logged_in(content):
+                            _fail_count += 1
+                            if under_challenge(content):
+                                logger.warn(f"站点 {indexer.get('name')} 被Cloudflare防护，无法登录，无法添加站点")
+                                continue
+                            logger.warn(
+                                f"站点 {indexer.get('name')} 登录失败，没有该站点账号或Cookie已失效，无法添加站点")
+                            continue
+                    elif res is not None:
                         _fail_count += 1
-                        logger.warn(f"站点 {indexer.get('name')} 连接失败，无法添加站点")
+                        logger.warn(f"站点 {indexer.get('name')} 连接状态码：{res.status_code}，无法添加站点")
                         continue
                     else:
-                        # 如果配置了代理，尝试通过代理重试
-                        logger.info(f"站点 {indexer.get('name')} 初次连接失败，尝试通过代理重试...")
-                        proxy = True
-                        res = RequestUtils(cookies=cookie,
-                                           ua=settings.USER_AGENT,
-                                           proxies=settings.PROXY
-                                           ).get_res(url=domain_url)
-                        if res and res.status_code in [200, 500, 403]:
-                            if not indexer.get("public") and not SiteUtils.is_logged_in(res.text):
-                                logger.warn(f"站点 {indexer.get('name')} 登录失败，即使通过代理，无法添加站点")
+                        if not settings.PROXY_HOST:
+                            _fail_count += 1
+                            logger.warn(f"站点 {indexer.get('name')} 连接失败，无法添加站点")
+                            continue
+                        else:
+                            # 如果配置了代理，尝试通过代理重试
+                            logger.info(f"站点 {indexer.get('name')} 初次连接失败，尝试通过代理重试...")
+                            proxy = True
+                            res = RequestUtils(cookies=cookie,
+                                               ua=settings.USER_AGENT,
+                                               proxies=settings.PROXY
+                                               ).get_res(url=domain_url)
+                            if res and res.status_code in [200, 500, 403]:
+                                if not indexer.get("public") and not SiteUtils.is_logged_in(res.text):
+                                    logger.warn(f"站点 {indexer.get('name')} 登录失败，即使通过代理，无法添加站点")
+                                    _fail_count += 1
+                                    continue
+                                logger.info(f"站点 {indexer.get('name')} 通过代理连接成功")
+                            else:
+                                logger.warn(f"站点 {indexer.get('name')} 通过代理连接失败，无法添加站点")
                                 _fail_count += 1
                                 continue
-                            logger.info(f"站点 {indexer.get('name')} 通过代理连接成功")
-                        else:
-                            logger.warn(f"站点 {indexer.get('name')} 通过代理连接失败，无法添加站点")
-                            _fail_count += 1
-                            continue
 
-                # 获取rss地址
-                rss_url = None
-                if not indexer.get("public") and domain_url:
-                    # 自动生成rss地址
-                    rss_url, errmsg = rsshelper.get_rss_link(url=domain_url,
-                                                             cookie=cookie,
-                                                             ua=settings.USER_AGENT,
-                                                             proxy=proxy)
-                    if errmsg:
-                        logger.warn(errmsg)
-                # 插入数据库
-                logger.info(f"新增站点 {indexer.get('name')} ...")
-                siteoper.add(name=indexer.get("name"),
-                             url=domain_url,
-                             domain=domain,
-                             cookie=cookie,
-                             rss=rss_url,
-                             proxy=1 if proxy else 0,
-                             public=1 if indexer.get("public") else 0)
-                _add_count += 1
+                    # 获取rss地址
+                    rss_url = None
+                    if not indexer.get("public") and domain_url:
+                        # 自动生成rss地址
+                        rss_url, errmsg = rsshelper.get_rss_link(url=domain_url,
+                                                                 cookie=cookie,
+                                                                 ua=settings.USER_AGENT,
+                                                                 proxy=proxy)
+                        if errmsg:
+                            logger.warn(errmsg)
+                    # 插入数据库
+                    logger.info(f"新增站点 {indexer.get('name')} ...")
+                    siteoper.add(name=indexer.get("name"),
+                                 url=domain_url,
+                                 domain=domain,
+                                 cookie=cookie,
+                                 rss=rss_url,
+                                 proxy=1 if proxy else 0,
+                                 public=1 if indexer.get("public") else 0)
+                    _add_count += 1
 
-            # 通知站点更新
-            if indexer:
-                eventmanager.send_event(EventType.SiteUpdated, {
-                    "domain": domain,
-                })
+                # 通知站点更新
+                if indexer:
+                    eventmanager.send_event(EventType.SiteUpdated, {
+                        "domain": domain,
+                    })
+            except Exception as e:
+                _fail_count += 1
+                logger.error(f"站点 {domain} CookieCloud同步处理异常：{e}", exc_info=True)
             if progress_callback:
                 progress_callback(
                     value=index / total_num * 100 if total_num else 100,
@@ -646,8 +654,11 @@ class SiteChain(InteractionChainMixin, ChainBase):
         site_keys = systemconfig.get().keys()
         for key in site_keys:
             if key.startswith(f"site.{domain_host}"):
-                logger.info(f"清理站点配置：{key}")
-                systemconfig.delete(key)
+                try:
+                    logger.info(f"清理站点配置：{key}")
+                    systemconfig.delete(key)
+                except Exception as e:
+                    logger.error(f"清理站点配置 {key} 失败：{e}", exc_info=True)
 
     @eventmanager.register(EventType.SiteUpdated)
     def cache_site_userdata(self, event: Event):

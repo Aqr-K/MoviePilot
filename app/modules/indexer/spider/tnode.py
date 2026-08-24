@@ -36,8 +36,11 @@ class TNodeSpider(metaclass=SingletonClass):
             self._ua = indexer.get('ua')
             self._timeout = indexer.get('timeout') or 15
 
-    @cached(region="indexer_spider", maxsize=1, ttl=60 * 60 * 24, skip_empty=True, shared_key="get_token")
-    def __get_token(self) -> Optional[str]:
+    # site_key（站点域名）必须显式传入：缓存装饰器剥离self，__get_token/__async_get_token
+    # 除self外没有其它参数会导致缓存键退化为常量，令所有站点共用同一条token缓存并互相覆盖。
+    # maxsize 覆盖常见并存站点数量。
+    @cached(region="indexer_spider", maxsize=256, ttl=60 * 60 * 24, skip_empty=True, shared_key="get_token")
+    def __get_token(self, site_key: str) -> Optional[str]:
         if not self._domain:
             return
         res = RequestUtils(ua=self._ua,
@@ -50,8 +53,8 @@ class TNodeSpider(metaclass=SingletonClass):
                 return csrf_token.group(1)
         return None
 
-    @cached(region="indexer_spider", maxsize=1, ttl=60 * 60 * 24, skip_empty=True, shared_key="get_token")
-    async def __async_get_token(self) -> Optional[str]:
+    @cached(region="indexer_spider", maxsize=256, ttl=60 * 60 * 24, skip_empty=True, shared_key="get_token")
+    async def __async_get_token(self, site_key: str) -> Optional[str]:
         if not self._domain:
             return
         res = await AsyncRequestUtils(ua=self._ua,
@@ -117,7 +120,7 @@ class TNodeSpider(metaclass=SingletonClass):
         搜索
         """
         # 获取token
-        _token = self.__get_token()
+        _token = self.__get_token(self._domain)
         if not _token:
             logger.warn(f"{self._name} 未获取到token，无法搜索")
             return True, []
@@ -151,7 +154,7 @@ class TNodeSpider(metaclass=SingletonClass):
         异步搜索
         """
         # 获取token
-        _token = await self.__async_get_token()
+        _token = await self.__async_get_token(self._domain)
         if not _token:
             logger.warn(f"{self._name} 未获取到token，无法搜索")
             return True, []
