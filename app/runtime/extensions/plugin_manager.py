@@ -11,8 +11,12 @@ import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Type, Union, Callable, Tuple
+from typing import (
+    Any, Dict, Iterable, List, Optional, ParamSpec, Set, Type, TypeVar, Union,
+    Callable, Tuple, cast,
+)
 
 from fastapi import HTTPException
 from starlette import status
@@ -28,6 +32,7 @@ from app.foundation.version import compare_version
 from app.runtime.log import bind_plugin_instance, logger
 from app.runtime.config import settings
 from app.runtime.events import Event, EventHandlerBinding, eventmanager
+from app.runtime.observability import record_metric
 from app.runtime.reload import ConfigReloadMixin
 from app.runtime.deprecation.policy import is_active as deprecation_is_active
 from app.runtime.deprecation.policy import warn as deprecation_warn
@@ -336,6 +341,47 @@ def _configure_plugin_database_lifecycle(
     _plugin_database_destroy = destroy
 
 
+_LifecycleParams = ParamSpec("_LifecycleParams")
+_LifecycleResult = TypeVar("_LifecycleResult")
+
+
+def observe_plugin_lifecycle(
+        operation: str,
+) -> Callable[[Callable[_LifecycleParams, _LifecycleResult]], Callable[_LifecycleParams, _LifecycleResult]]:
+    """为插件生命周期入口记录不含插件标识的低基数耗时。"""
+
+    def decorator(
+            func: Callable[_LifecycleParams, _LifecycleResult],
+    ) -> Callable[_LifecycleParams, _LifecycleResult]:
+        """包装单个同步生命周期方法，并保留原始调用签名。"""
+
+        @wraps(func)
+        def wrapper(*args: _LifecycleParams.args, **kwargs: _LifecycleParams.kwargs) -> _LifecycleResult:
+            """执行生命周期方法并把失败状态归一为 error。"""
+            started_at = time.perf_counter()
+            outcome = "success"
+            try:
+                result = func(*args, **kwargs)
+                statuses = result.values() if isinstance(result, dict) else (result,)
+                if PluginRuntimeStatus.LOAD_FAILED in statuses:
+                    outcome = "error"
+                return result
+            except BaseException:
+                outcome = "error"
+                raise
+            finally:
+                record_metric(
+                    "plugin.lifecycle.duration",
+                    time.perf_counter() - started_at,
+                    operation=operation,
+                    outcome=outcome,
+                )
+
+        return cast(Callable[_LifecycleParams, _LifecycleResult], wrapper)
+
+    return decorator
+
+
 class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     """插件管理器"""
     CONFIG_WATCH = {"DEV", "PLUGIN_AUTO_RELOAD", "PLUGIN_LOCAL_REPO_PATHS"}
@@ -405,6 +451,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         for plugin_id in classification.ready:
             self.start(plugin_id)
 
+    @observe_plugin_lifecycle("start")
     def start(
         self,
         pid: Optional[str] = None,
@@ -938,6 +985,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             if matches_extension(key, pid)
         ]
 
+    @observe_plugin_lifecycle("initialize")
     def init_plugin(self, plugin_id: str, conf: dict, instance_id: Optional[str] = None):
         """
         初始化插件
@@ -990,6 +1038,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         with self._plugin_agent_tools_cache_lock:
             return self._plugin_agent_tools_revision
 
+    @observe_plugin_lifecycle("stop")
     def stop(self, pid: Optional[str] = None, instance_id: Optional[str] = None):
         """
         停止插件服务
@@ -1672,6 +1721,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         """
         self.stop(plugin_id)
 
+    @observe_plugin_lifecycle("reload")
     def reload_plugin(self, plugin_id: str) -> PluginRuntimeStatus:
         """
         将一个插件重新加载到内存

@@ -20,7 +20,7 @@ from app.runtime.extensions.contract.module_method import (
 )
 from app.runtime.extensions.projection.plugin import PluginProviderSource
 from app.runtime.log import logger
-from app.runtime.observability import observe_duration
+from app.runtime.observability import observe_duration, record_metric
 from app.schemas.exception import RateLimitExceededException
 
 
@@ -456,8 +456,27 @@ class ModuleInvocationDispatcher:
         :param kwargs: 透传给上报策略的命名参数
         :return: 无返回值
         """
+        self._record_timeout(provider, method, err)
         handler = self._fault_handlers[provider.fault_scope]
         handler(err, provider.extension_id, provider.display_name, method, **kwargs)
+
+    @staticmethod
+    def _record_timeout(
+        provider: ExtensionProvider,
+        method: str,
+        error: Exception,
+    ) -> None:
+        """仅把真实超时归入低基数模块超时指标。"""
+        if isinstance(error, TimeoutError):
+            record_metric(
+                "module.provider.timeout",
+                method=method,
+                provider_type=(
+                    "plugin"
+                    if provider.fault_scope is ExtensionFaultScope.PLUGIN
+                    else "system"
+                ),
+            )
 
     def _report_rate_limit(
         self,

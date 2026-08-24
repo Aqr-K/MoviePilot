@@ -80,8 +80,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7036,
-  "edge_sha256": "843484eeb2391f582e40fce2f9ba4de268ce9738296fed9c6e1a06d02bb8686a",
+  "edge_count": 7039,
+  "edge_sha256": "9f3c4a6cea57704aea4c8e349b9bd1b03edca2bae113f20a1e21a263d74699c3",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3645,6 +3645,7 @@
     "app.db.engine -> app.runtime",
     "app.db.engine -> app.runtime.config",
     "app.db.engine -> app.runtime.log",
+    "app.db.engine -> app.runtime.observability",
     "app.db.health -> app.db",
     "app.db.health -> app.db.session",
     "app.db.maintenance -> app.db",
@@ -3924,6 +3925,7 @@
     "app.db.session -> app.runtime",
     "app.db.session -> app.runtime.config",
     "app.db.session -> app.runtime.log",
+    "app.db.session -> app.runtime.observability",
     "app.doctor.checks -> app.adapters",
     "app.doctor.checks -> app.adapters.system",
     "app.doctor.checks -> app.adapters.system.host",
@@ -5952,6 +5954,7 @@
     "app.runtime.extensions.plugin_manager -> app.runtime.extensions.registry.storage",
     "app.runtime.extensions.plugin_manager -> app.runtime.extensions.service_config",
     "app.runtime.extensions.plugin_manager -> app.runtime.log",
+    "app.runtime.extensions.plugin_manager -> app.runtime.observability",
     "app.runtime.extensions.plugin_manager -> app.runtime.reload",
     "app.runtime.extensions.plugin_manager -> app.schemas",
     "app.runtime.extensions.plugin_manager -> app.schemas.notification",
