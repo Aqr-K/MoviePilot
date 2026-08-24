@@ -151,18 +151,22 @@ class TmdbChain(ChainBase):
         """
         return self.unicast("person_credits", source=MediaSource.TMDB, person_id=person_id, page=page)
 
+    @staticmethod
+    def __pick_random_backdrop(infos: Optional[list]) -> Optional[str]:
+        """
+        在带背景图的条目中随机取一张背景图路径。
+
+        :param infos: 趋势榜条目，可为空
+        :return: 随机一条背景图路径，没有可用条目时返回 None
+        """
+        candidates = [info.backdrop_path for info in infos or [] if info and info.backdrop_path]
+        return random.choice(candidates) if candidates else None
+
     def get_random_wallpager(self) -> Optional[str]:
         """
         获取随机壁纸，缓存1个小时
         """
-        infos = self.tmdb_trending()
-        if infos:
-            # 随机一个电影
-            while True:
-                info = random.choice(infos)
-                if info and info.backdrop_path:
-                    return info.backdrop_path
-        return None
+        return self.__pick_random_backdrop(self.tmdb_trending())
 
     def get_trending_wallpapers(self, num: Optional[int] = 10) -> List[str]:
         """
@@ -325,14 +329,7 @@ class TmdbChain(ChainBase):
         """
         获取随机壁纸（异步版本），缓存1个小时
         """
-        infos = await self.async_tmdb_trending()
-        if infos:
-            # 随机一个电影
-            while True:
-                info = random.choice(infos)
-                if info and info.backdrop_path:
-                    return info.backdrop_path
-        return None
+        return self.__pick_random_backdrop(await self.async_tmdb_trending())
 
     async def async_get_trending_wallpapers(self, num: Optional[int] = 10) -> List[str]:
         """

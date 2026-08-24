@@ -72,16 +72,38 @@ def attribute_plugin_from_stack(
     return None
 
 
+def attribute_plugin_from_frame(frame) -> Optional[PluginStackAttribution]:
+    """沿帧链向外回溯，定位最内层（最贴近阻塞点）的插件代码帧。
+
+    直接读取帧的代码对象，不经 `traceback.extract_stack`：后者会为栈中每个文件
+    调用 `linecache.checkcache` 触发 `os.stat` 并读取源码行，而归因只需要文件名、
+    行号与函数名。采样以固定频率常驻运行，这笔开销会按栈深放大成常驻负担。
+
+    :param frame: 起始帧，通常是目标线程当前正在执行的帧，可为 None
+    :return: 命中的插件归因信息，未发现插件代码时返回 None
+    """
+    current = frame
+    while current is not None:
+        filename = current.f_code.co_filename
+        plugin_id = _plugin_id_from_file_path(filename)
+        if plugin_id:
+            return PluginStackAttribution(
+                plugin_id=plugin_id,
+                file=filename,
+                line=current.f_lineno,
+                function=current.f_code.co_name,
+            )
+        current = current.f_back
+    return None
+
+
 def attribute_plugin_from_thread_frame(thread_ident: int) -> Optional[PluginStackAttribution]:
     """从指定线程当前挂起的 Python 帧向上回溯，定位插件代码帧。
 
     :param thread_ident: 目标线程的 `threading.get_ident()` 值
     :return: 命中的插件归因信息，取不到帧或未发现插件代码时返回 None
     """
-    frame = sys._current_frames().get(thread_ident)
-    if frame is None:
-        return None
-    return attribute_plugin_from_stack(traceback.extract_stack(frame))
+    return attribute_plugin_from_frame(sys._current_frames().get(thread_ident))
 
 
 _event_loop_thread_ident: Optional[int] = None
@@ -151,11 +173,8 @@ class EventLoopBlockingWatchdog:
         """采样一次目标线程当前帧并记入历史，未命中插件代码也记录空结果以标注采样时刻。"""
         if self._loop_thread_ident is None:
             return
-        frame = sys._current_frames().get(self._loop_thread_ident)
-        attribution = (
-            attribute_plugin_from_stack(traceback.extract_stack(frame))
-            if frame is not None
-            else None
+        attribution = attribute_plugin_from_frame(
+            sys._current_frames().get(self._loop_thread_ident)
         )
         with self._lock:
             self._history.append((time.monotonic(), attribution))
