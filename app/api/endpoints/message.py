@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Annotated, Protocol, Union, Any, List, Optional
+from typing import Annotated, Any, List, Optional, Protocol, Union
 
 from fastapi import Depends, Request
 from starlette.responses import PlainTextResponse
