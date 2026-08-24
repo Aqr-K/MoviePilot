@@ -7,7 +7,7 @@ from app.runtime.log import logger
 from app.runtime.hostports.siteresource import site_resource_port
 from app.modules import _ModuleBase
 from app.modules.indexer.parser import SiteParserBase
-from app.modules.indexer.parser.registry import load_builtin_parsers, resolve_parser_class
+from app.modules.indexer.parser.registry import load_builtin_parsers, registered_schemas, resolve_parser_class
 from app.modules.indexer.spider import SiteSpider
 from app.modules.indexer.spider.mtorrent import MTorrentSpider
 from app.modules.indexer.spider.registry import build_search_kwargs, resolve_spider_class
@@ -512,11 +512,13 @@ class IndexerModule(_ModuleBase):
         :return: 用户数据
         """
 
-        def __get_site_obj() -> Optional[SiteParserBase]:
+        def __get_site_obj(schema_value: Optional[str] = None) -> Optional[SiteParserBase]:
             """
             获取站点解析器
+            :param schema_value: 指定 schema，默认取站点声明的 schema
             """
-            parser_cls = resolve_parser_class(site.get("schema"))
+            schema_value = schema_value or site.get("schema")
+            parser_cls = resolve_parser_class(schema_value)
             if not parser_cls:
                 return None
             return parser_cls(
@@ -529,6 +531,7 @@ class IndexerModule(_ModuleBase):
                 proxy=site.get("proxy"),
                 api_url=site.get("api_url"))
 
+        # 按站点声明的 schema 获取解析器
         site_obj = __get_site_obj()
         if not site_obj:
             if not site.get("public"):
@@ -540,6 +543,28 @@ class IndexerModule(_ModuleBase):
             logger.info(f"站点 {site.get('name')} 开始以 {site.get('schema')} 模型解析数据...")
             site_obj.parse()
             logger.debug(f"站点 {site.get('name')} 数据解析完成")
+            # 站点声明的 schema 解析失败（userid 为空）时，自动尝试其他解析器，
+            # 兼容资源文件 schema 标注错误/变种站点的场景
+            if not site_obj.userid and not site.get("public"):
+                tried = {site.get("schema")}
+                for candidate_schema in registered_schemas():
+                    if candidate_schema in tried:
+                        continue
+                    tried.add(candidate_schema)
+                    logger.info(f"站点 {site.get('name')} schema {site.get('schema')} 解析失败，"
+                                f"尝试 {candidate_schema} 模型...")
+                    alt_obj = __get_site_obj(candidate_schema)
+                    if not alt_obj:
+                        continue
+                    try:
+                        alt_obj.parse()
+                    except Exception as e:
+                        logger.error(f"站点 {site.get('name')} 以 {candidate_schema} 解析失败：{str(e)}")
+                        continue
+                    if alt_obj.userid:
+                        site_obj = alt_obj
+                        logger.info(f"站点 {site.get('name')} 改用 {candidate_schema} 模型解析成功")
+                        break
             return SiteUserData(
                 domain=site_rules.extract_domain(site.get("url")),
                 userid=site_obj.userid,
