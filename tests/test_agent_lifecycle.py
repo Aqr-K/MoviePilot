@@ -10,6 +10,10 @@ from app.agent.orchestrator import (
     AgentManagerQueueFullError,
     AgentManagerUnavailableError,
 )
+from app.application.messaging.agent import (
+    create_web_agent_background_task,
+    shutdown_web_agent_background_tasks,
+)
 from app.agent.memory import MemoryManager
 from app.startup import agent_initializer, modules_initializer
 
@@ -18,6 +22,56 @@ from app.startup import agent_initializer, modules_initializer
 def anyio_backend() -> str:
     """限定异步用例使用项目 Agent 运行时采用的 asyncio 后端。"""
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_web_agent_background_tasks_are_cancelled_and_drained() -> None:
+    """Web Agent 任务关闭后不得继续占用循环或提交晚到的快照。"""
+    started = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def blocked_task() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            finished.set()
+
+    task = create_web_agent_background_task(blocked_task())
+    await started.wait()
+    await shutdown_web_agent_background_tasks()
+
+    assert task.done()
+    assert task.cancelled()
+    assert finished.is_set()
+
+
+@pytest.mark.anyio
+async def test_web_agent_shutdown_does_not_cancel_task_cleanup_via_gather() -> None:
+    """收口协程自身被取消时，asyncio.wait 不得级联取消仍在收尾的任务。"""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def task_with_slow_cleanup() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+            raise
+
+    task = create_web_agent_background_task(task_with_slow_cleanup())
+    await started.wait()
+    shutdown = asyncio.create_task(shutdown_web_agent_background_tasks())
+    await asyncio.sleep(0)
+    shutdown.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await shutdown
+
+    assert task.done() is False
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 @pytest.mark.anyio

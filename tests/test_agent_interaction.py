@@ -13,8 +13,6 @@ from app.agent.tools.impl.send_message import SendMessageTool
 from app.application.messaging.agent import (
     AgentInteractionOption,
     agent_interaction_manager,
-    create_web_agent_background_task,
-    shutdown_web_agent_background_tasks,
 )
 from app.application.messaging.interaction import InteractionContext
 from app.application.orchestration.message import MessageChain
@@ -307,28 +305,3 @@ class TestAgentInteraction(unittest.TestCase):
                 )
         finally:
             MessageChain._user_sessions.clear()
-
-
-def test_shutdown_web_agent_background_tasks_cancels_and_awaits_pending_task():
-    """应用关闭时必须取消并等待已登记的 Web Agent 后台任务，不留下悬空任务。"""
-    started = asyncio.Event()
-    cancelled = asyncio.Event()
-
-    async def blocked_task():
-        started.set()
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            cancelled.set()
-            raise
-
-    async def scenario():
-        task = create_web_agent_background_task(blocked_task())
-        await started.wait()
-        await shutdown_web_agent_background_tasks()
-        return task
-
-    task = asyncio.run(scenario())
-
-    assert cancelled.is_set()
-    assert task.cancelled()

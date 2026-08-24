@@ -200,7 +200,10 @@ async def shutdown_web_agent_background_tasks() -> None:
     for task in tasks:
         task.cancel()
     if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # asyncio.wait 不会因本协程自身被取消而级联取消这些任务；仍在收尾的
+        # 任务会保留在注册表中，直到自己的数据库操作取得确定终态。改用 gather
+        # 会在关闭步骤超时、本协程被上层显式取消时立即中断这些任务的收尾。
+        await asyncio.wait(tasks)
 
 
 def normalize_web_agent_button_rows(buttons: Optional[list[list[dict]]]) -> list[list[dict]]:
