@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7088,
-  "edge_sha256": "50d1b47d497f551a5237b4faac1aae2b7cff149a12cd2a7c507736097161e7f9",
+  "edge_count": 7089,
+  "edge_sha256": "ab45f79332aeaddbf9efebddd2958bd1119ef0d2ef03fc7bb6da8f3577c802b1",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -4487,6 +4487,7 @@
     "app.modules.imdb.api -> app.runtime.cache",
     "app.modules.imdb.api -> app.runtime.config",
     "app.modules.imdb.api -> app.runtime.log",
+    "app.modules.imdb.api -> app.runtime.tasks",
     "app.modules.indexer -> app.db",
     "app.modules.indexer -> app.db.oper",
     "app.modules.indexer -> app.db.oper.site",
