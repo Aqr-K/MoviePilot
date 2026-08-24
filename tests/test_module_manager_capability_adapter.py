@@ -22,14 +22,12 @@ from app.runtime.events import Event, EventHandlerBinding, eventmanager
 from app.runtime.extensions.lifecycle import host_module_adapter
 from app.runtime.extensions import module_manager as module_manager_extension
 from app.runtime.extensions.module_manager import ModuleManager
-
 from app.runtime.extensions.service_config import (
     configure_service_config_reader,
     configure_service_instance_config_reader,
     service_config_key,
-    service_config_key,
 )
-from app.schemas import ConfigChangeEventData
+from app.schemas.event import ConfigChangeEventData
 from app.schemas.types import EventType
 
 
@@ -640,7 +638,7 @@ from app.runtime.extensions.service_config import (
     configure_service_instance_config_reader,
     service_config_key,
 )
-from app.schemas import ConfigChangeEventData
+from app.schemas.event import ConfigChangeEventData
 from app.schemas.types import EventType
 
 registry = build_host_module_registry()
