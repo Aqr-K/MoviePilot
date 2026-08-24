@@ -1,3 +1,4 @@
+import copy
 from typing import Any, Union, Dict, Optional
 
 from app.db.base import DbOper
@@ -42,13 +43,14 @@ class UserConfigOper(DbOper, metaclass=Singleton):
         """
         获取用户配置
         """
+        # 避免将内部缓存的值引用出去，会导致调用方误改内部状态或 set 时误判没有变动
         if not username:
-            return self.__USERCONF
+            return copy.deepcopy(self.__USERCONF)
         if isinstance(key, UserConfigKey):
             key = key.value
         if not key:
-            return self.__get_config_caches(username=username)
-        return self.__get_config_cache(username=username, key=key)
+            return copy.deepcopy(self.__get_config_caches(username=username))
+        return copy.deepcopy(self.__get_config_cache(username=username, key=key))
 
     def __set_config_cache(self, username: str, key: str, value: Any):
         """
