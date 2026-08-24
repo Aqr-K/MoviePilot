@@ -1758,7 +1758,6 @@ wheels = [
 
 [[package]]
 name = "moviepilot"
-version = "0"
 source = { virtual = "." }
 dependencies = [
     { name = "aiofiles" },
