@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Any, Optional, Union
+from typing import Any, ClassVar, Optional, Union
 from weakref import WeakValueDictionary
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,9 @@ class AgentChatOper(DbOper):
     # 异步写方法（追加/保存展示消息、保存原始消息、写标题）都是先读后写的复合操作，
     # 同一会话并发写入会发生丢更新；按 session_id 弱引用持有锁，不限制不同会话间的并发，
     # 且不为已结束的会话永久占用内存。
-    _session_write_locks: "WeakValueDictionary[str, asyncio.Lock]" = WeakValueDictionary()
+    _session_write_locks: ClassVar["WeakValueDictionary[str, asyncio.Lock]"] = (
+        WeakValueDictionary()
+    )
 
     def __init__(self, db: Optional[Union[Session, AsyncSession]] = None):
         super().__init__(db)

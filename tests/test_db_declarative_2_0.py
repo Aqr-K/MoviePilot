@@ -29,6 +29,10 @@ DB_PACKAGE = PROJECT_ROOT / "app" / "db"
 # 匹配 Mapped[...]、orm.Mapped[...] 等带限定前缀的写法；不带下标的裸 Mapped 不算
 MAPPED_ANNOTATION = re.compile(r"^(?:[\w.]+\.)?Mapped\[")
 
+# 匹配 ClassVar[...]、typing.ClassVar[...] 等带限定前缀的写法；2.0 声明式系统会跳过
+# ClassVar，因此显式声明为 ClassVar 的类级属性不受本守卫约束，见下方用例说明。
+CLASSVAR_ANNOTATION = re.compile(r"^(?:[\w.]+\.)?ClassVar\[")
+
 SQLALCHEMY = "sqlalchemy"
 
 
@@ -158,6 +162,7 @@ def test_no_unmapped_class_level_annotations_in_db_package():
         for py_file in sorted(DB_PACKAGE.rglob("*.py"))
         for cls_name, attr, annotation, lineno in _class_level_annotations(py_file)
         if not MAPPED_ANNOTATION.match(annotation)
+        and not CLASSVAR_ANNOTATION.match(annotation)
     ]
     assert not offenders, (
         "app/db 内出现了非 Mapped[] 的类级注解，而 __allow_unmapped__ 已移除，"
