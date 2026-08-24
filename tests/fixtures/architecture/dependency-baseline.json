@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7076,
-  "edge_sha256": "d0380211be70d88ad98c96a3750707dba665b12b484a591eda59aac3c2a65c40",
+  "edge_count": 7082,
+  "edge_sha256": "4f76ccaaf01fbc0875368b379e10538be2c7a298239ce34c42e467c2c37ff562",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3369,6 +3369,11 @@
     "app.application.plugin.folders -> app.runtime.log",
     "app.application.plugin.folders -> app.schemas",
     "app.application.plugin.folders -> app.schemas.types",
+    "app.application.plugin.install -> app.application",
+    "app.application.plugin.install -> app.application.plugin",
+    "app.application.plugin.install -> app.application.plugin.lifecycle",
+    "app.application.plugin.install -> app.runtime",
+    "app.application.plugin.install -> app.runtime.log",
     "app.application.recognition -> app.application",
     "app.application.recognition -> app.application.configuration",
     "app.application.recognition -> app.schemas",
@@ -6785,6 +6790,7 @@
     "app.startup.lifecycle -> app.application.orchestration",
     "app.startup.lifecycle -> app.application.orchestration.system",
     "app.startup.lifecycle -> app.application.plugin",
+    "app.startup.lifecycle -> app.application.plugin.lifecycle",
     "app.startup.lifecycle -> app.application.plugin.runtime",
     "app.startup.lifecycle -> app.db",
     "app.startup.lifecycle -> app.runtime",
@@ -7162,7 +7168,7 @@
     "app.workflow.service -> app.schemas.workflow",
     "app.workflow.service -> app.workflow"
   ],
-  "module_count": 893,
+  "module_count": 894,
   "modules": [
     "app",
     "app.adapters",
@@ -7499,6 +7505,7 @@
     "app.application.plugin.data",
     "app.application.plugin.folders",
     "app.application.plugin.install",
+    "app.application.plugin.lifecycle",
     "app.application.plugin.routes",
     "app.application.plugin.runtime",
     "app.application.recognition",

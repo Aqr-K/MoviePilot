@@ -1905,6 +1905,30 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         )
 
     @staticmethod
+    async def async_install_plugin_missing_dependencies_with_status() -> PluginDependencyInstallResult:
+        """
+        在异步启动链中安装缺失或不兼容的依赖项，安装子进程保留可取消语义
+        :return: 缺失依赖项与本次安装是否全部成功
+        """
+        dependency_installer = get_plugin_system().dependency
+        missing_dependencies = await dependency_installer.async_find_missing()
+        if not missing_dependencies:
+            return PluginDependencyInstallResult(missing=[], success=True)
+        logger.debug(f"检测到缺失的依赖项: {missing_dependencies}")
+        logger.info(f"开始安装缺失的依赖项，共 {len(missing_dependencies)} 个...")
+        total_start_time = time.time()
+        success, _message = await dependency_installer.async_install(missing_dependencies)
+        total_elapsed_time = time.time() - total_start_time
+        if success:
+            logger.info(f"已完成 {len(missing_dependencies)} 个依赖项安装，总耗时：{total_elapsed_time:.2f} 秒")
+        else:
+            logger.warning(f"存在缺失依赖项安装失败，请尝试手动安装，总耗时：{total_elapsed_time:.2f} 秒")
+        return PluginDependencyInstallResult(
+            missing=missing_dependencies,
+            success=bool(success),
+        )
+
+    @staticmethod
     def classify_plugins() -> PluginDependencyClassification:
         """
         按源码和依赖是否就绪划分已安装插件
