@@ -32,7 +32,7 @@ from app.foundation.version import compare_version
 from app.runtime.log import bind_plugin_instance, logger
 from app.runtime.config import settings
 from app.runtime.events import Event, EventHandlerBinding, eventmanager
-from app.runtime.observability import record_metric
+from app.runtime.observability import observe_compat_facade, record_metric
 from app.runtime.reload import ConfigReloadMixin
 from app.runtime.deprecation.policy import is_active as deprecation_is_active
 from app.runtime.deprecation.policy import warn as deprecation_warn
@@ -382,6 +382,7 @@ def _observe_plugin_lifecycle(
     return decorator
 
 
+@observe_compat_facade("PluginManager")
 class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     """插件管理器"""
     CONFIG_WATCH = {"DEV", "PLUGIN_AUTO_RELOAD", "PLUGIN_LOCAL_REPO_PATHS"}
