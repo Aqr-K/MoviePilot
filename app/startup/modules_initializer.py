@@ -33,6 +33,8 @@ from app.application.messaging.message import (
     MessageQueueManager,
     stop_message,
 )
+from app.api.data import get_api_data_ports
+from app.api.host_runtime import AgentChatRuntime, HostRuntime
 from app.db.oper.message import MessageOper
 from app.runtime.cache import AsyncFileCache, FileCache
 from app.runtime.extensions.projection.dispatcher import ModuleInvocationDispatcher
@@ -46,10 +48,13 @@ from app.application.database import configure_database_governance
 from app.application.module import configure_module_runtime
 from app.application.plugin.runtime import configure_plugin_runtime
 from app.db import close_database
+from app.db.oper.agentchat import AgentChatOper
 from app.db.oper.serviceconfig import ServiceConfigOper
 from app.db.oper.subscribe import SubscribeOper
 from app.db.oper.systemconfig import SystemConfigOper
 from app.db.oper.workflow import WorkflowOper
+from app.db.session import get_async_db
+from app.db.uow import SqlAlchemyAsyncUnitOfWork
 from app.application.messaging.gateway import CommandChain
 from app.schemas.message import Message
 from app.schemas.message import MessageType
@@ -376,9 +381,9 @@ async def stop_modules():
     await run_step("临时文件", clear_temp)
 
 
-async def init_modules():
+async def init_modules() -> HostRuntime:
     """
-    启动模块
+    启动模块并返回本次 lifespan 唯一的类型化 HostRuntime。
     """
     # 扩展经端口取用目录、存储、命名、站点资源与规则配置，须先于模块加载完成注入。
     configure_host_ports()
@@ -386,6 +391,14 @@ async def init_modules():
     configure_module_runtime(lambda: ModuleManager())
     configure_plugin_runtime(lambda: PluginManager())
     # 数据访问能力统一在启动组合根注入，Runtime 和 Adapter 不再直接依赖 Oper。
+    host_runtime = HostRuntime(
+        agent_chat=AgentChatRuntime(
+            async_session=get_async_db,
+            repository=AgentChatOper,
+            transaction=SqlAlchemyAsyncUnitOfWork,
+        ),
+        compatibility_api_data=get_api_data_ports(),
+    )
     configure_runtime_data_providers()
     # 数据库健康探测、清理与备份统一走同一个治理门面，由启动组合根装配后各处按端口取用。
     configure_database_governance(build_database_governance())
@@ -432,3 +445,4 @@ async def init_modules():
     start_frontend()
     # 检查认证状态
     check_auth()
+    return host_runtime
