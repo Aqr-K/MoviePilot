@@ -9,7 +9,7 @@
     "root": "app"
   },
   "settings_imports": {
-    "count": 177,
+    "count": 176,
     "files": [
       "app/adapters/cache/backends.py",
       "app/adapters/cache/redis.py",
@@ -182,7 +182,6 @@
       "app/startup/lifecycle/__init__.py",
       "app/startup/modules_initializer.py",
       "app/startup/plugins_initializer.py",
-      "app/startup/routers_initializer.py",
       "app/workflow/actions/add_subscribe.py",
       "app/workflow/actions/fetch_medias.py",
       "app/workflow/actions/fetch_rss.py",

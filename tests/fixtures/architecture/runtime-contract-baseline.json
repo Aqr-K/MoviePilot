@@ -2634,8 +2634,8 @@
         "consumers": [],
         "producers": [
           {
-            "caller": "app.application.orchestration.subscribe",
-            "count": 1
+            "caller": "app.startup.dataports_initializer",
+            "count": 2
           }
         ]
       },
@@ -2763,7 +2763,7 @@
         ]
       }
     },
-    "producer_count": 77
+    "producer_count": 78
   },
   "module_method_specs": {
     "anilist_credits": {
