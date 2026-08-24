@@ -138,19 +138,41 @@ def get_delete_subscriptions_by_identity_command(
     )
 
 
+def _start_subscription_search_batch(
+        subscribe_ids: tuple[int, ...] | None,
+        state: str | None,
+) -> None:
+    """把一个请求的搜索目标作为同一调度任务提交。"""
+    if subscribe_ids is None:
+        start_scheduler_job(
+            "subscribe_search",
+            sid=None,
+            state=state,
+            manual=True,
+        )
+        return
+    start_scheduler_job(
+        "subscribe_search",
+        sids=subscribe_ids,
+        state=None,
+        manual=True,
+    )
+
+
 def get_search_subscriptions_command(
         background_tasks: BackgroundTasks,
         db: AsyncSession = Depends(get_async_db),
 ) -> SearchSubscriptionsCommand:
     """组装手工订阅搜索用例，并把调度延迟到响应后的后台任务。"""
-    def schedule_search(subscribe_id: int | None, state: str | None) -> None:
-        """按历史参数提交订阅搜索调度任务。"""
+    def schedule_search(
+            subscribe_ids: tuple[int, ...] | None,
+            state: str | None,
+    ) -> None:
+        """把当前用户的搜索目标提交为一个后台批次。"""
         background_tasks.add_task(
-            start_scheduler_job,
-            job_id="subscribe_search",
-            sid=subscribe_id,
-            state=state,
-            manual=True,
+            _start_subscription_search_batch,
+            subscribe_ids,
+            state,
         )
 
     return SearchSubscriptionsCommand(
