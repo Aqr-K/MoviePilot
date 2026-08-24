@@ -9,7 +9,7 @@
     "root": "app"
   },
   "settings_imports": {
-    "count": 175,
+    "count": 177,
     "files": [
       "app/adapters/cache/backends.py",
       "app/adapters/cache/redis.py",
@@ -112,6 +112,8 @@
       "app/modules/emby/emby.py",
       "app/modules/fanart/__init__.py",
       "app/modules/feishu/feishu.py",
+      "app/modules/imdb/__init__.py",
+      "app/modules/imdb/api.py",
       "app/modules/indexer/parser/__init__.py",
       "app/modules/indexer/parser/rousi.py",
       "app/modules/indexer/spider/__init__.py",
