@@ -134,3 +134,20 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
             if conf:
                 self._stage_delete(SystemConfig, conf.id)
             return True
+
+    async def async_delete(self, key: Union[str, SystemConfigKey]) -> bool:
+        """
+        异步删除系统设置
+        :param key: 配置键
+        :return: 是否删除成功
+        """
+        if isinstance(key, SystemConfigKey):
+            key = key.value
+        async with self._alock:
+            conf = await SystemConfig.async_get_by_key(self._db, key)
+            with self._rlock:
+                # 更新内存
+                self.__SYSTEMCONF.pop(key, None)
+            if conf:
+                await self._stage_async_delete(SystemConfig, conf.id)
+            return True

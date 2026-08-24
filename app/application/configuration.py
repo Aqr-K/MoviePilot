@@ -29,6 +29,9 @@ class SystemConfigWriter(Protocol):
     def delete(self, key: Any) -> Any:
         """删除配置。"""
 
+    async def async_delete(self, key: Any) -> Any:
+        """异步删除配置。"""
+
 
 class ConfigurationRepository(SystemConfigReader, SystemConfigWriter, Protocol):
     """兼容同时提供读写能力的旧配置仓储。"""
@@ -78,6 +81,10 @@ class SystemConfigService:
     def delete(self, key: Any) -> Any:
         """删除配置。"""
         return self._writer.delete(key)
+
+    async def async_delete(self, key: Any) -> Any:
+        """异步删除配置。"""
+        return await self._writer.async_delete(key)
 
 
 _configured_system_config: SystemConfigService | None = None

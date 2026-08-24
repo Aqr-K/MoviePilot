@@ -19,6 +19,7 @@ def test_system_config_service_supports_separate_reader_and_writer() -> None:
     writer = MagicMock()
     writer.set.return_value = True
     writer.async_set = AsyncMock(return_value=True)
+    writer.async_delete = AsyncMock(return_value=True)
     service = SystemConfigService(reader=reader, writer=writer)
 
     assert service.get("key") == "old"
@@ -26,10 +27,12 @@ def test_system_config_service_supports_separate_reader_and_writer() -> None:
     assert asyncio.run(service.async_get("key")) == "async-old"
     assert asyncio.run(service.async_set("key", "new")) is True
     service.delete("key")
+    assert asyncio.run(service.async_delete("key")) is True
 
     reader.get.assert_called_once_with("key")
     writer.set.assert_called_once_with("key", "new")
     writer.delete.assert_called_once_with("key")
+    writer.async_delete.assert_awaited_once_with("key")
 
 
 def test_transfer_retry_provider_returns_frozen_snapshot_per_call() -> None:

@@ -355,6 +355,14 @@ class AsyncUnitOfWork(Protocol):
         ...
 
 
+class WorkflowCachePort(Protocol):
+    """工作流重置所需的异步配置缓存删除端口。"""
+
+    async def async_delete(self, key: Any) -> Any:
+        """异步删除配置缓存。"""
+        ...
+
+
 class WorkflowDefinitionCommand:
     """协调工作流创建、分享复用和重置的异步写用例。"""
 
@@ -364,14 +372,14 @@ class WorkflowDefinitionCommand:
         repository: AsyncWorkflowDefinitionRepository,
         unit_of_work: AsyncUnitOfWork,
         stop_running: Callable[[int], None],
-        delete_cache: Callable[[int], None],
+        async_delete_cache: Callable[[int], Awaitable[Any]],
         report_fork: Optional[Callable[[int], Awaitable[object]]] = None,
     ) -> None:
         """保存异步事务和提交后运行时副作用端口。"""
         self._repository = repository
         self._unit_of_work = unit_of_work
         self._stop_running = stop_running
-        self._delete_cache = delete_cache
+        self._async_delete_cache = async_delete_cache
         self._report_fork = report_fork
 
     async def create(self, payload: Mapping[str, Any]) -> WorkflowMutationResult:
@@ -448,7 +456,7 @@ class WorkflowDefinitionCommand:
         await self._repository.stage_reset(workflow_id, reset_count=True)
         await self._commit()
         self._stop_running(workflow_id)
-        self._delete_cache(workflow_id)
+        await self._async_delete_cache(workflow_id)
         return WorkflowMutationResult(True)
 
     async def _commit(self) -> None:

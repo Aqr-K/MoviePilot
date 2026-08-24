@@ -306,9 +306,9 @@ def get_workflow_definition_command(
         repository=_repository("workflow", db),
         unit_of_work=_transaction("async", db),
         stop_running=global_vars.stop_workflow,
-        delete_cache=lambda workflow_id: _standalone_repository("system_config").delete(
-            f"WorkflowCache-{workflow_id}"
-        ),
+        async_delete_cache=lambda workflow_id: _standalone_repository(
+            "system_config"
+        ).async_delete(f"WorkflowCache-{workflow_id}"),
         report_fork=MoviePilotServerHelper.async_workflow_fork_by_id,
     )
 
