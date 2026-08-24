@@ -192,7 +192,7 @@ async def _delete_subscribe_scope():
             repository=SubscribeOper(session),
             unit_of_work=SqlAlchemyAsyncUnitOfWork(session),
             publish_deleted=_publish_subscribe_deleted,
-            report_deleted=MoviePilotServerHelper.sub_done_async,
+            report_deleted=MoviePilotServerHelper.async_sub_done,
             outbox=SqlAlchemyAsyncOutboxStager(session),
         )
 
@@ -201,6 +201,14 @@ def configure_transactional_subscription_scopes() -> None:
     """登记 Agent 等非 HTTP 入口复用的订阅修改与删除事务作用域。"""
     configure_subscription_mutation_scope(_subscription_mutation_scope)
     configure_delete_subscribe_scope(_delete_subscribe_scope)
+
+
+def _dispatch_subscribe_deleted_report(message) -> None:
+    """重放订阅删除统计；未确认时抛错以进入有限重试。"""
+    if not MoviePilotServerHelper.sub_done(
+        message.payload.get("subscribe_info") or {}
+    ):
+        raise RuntimeError("订阅删除统计上报未确认")
 
 
 def _build_outbox_dispatcher() -> OutboxDispatcher:
@@ -221,6 +229,7 @@ def _build_outbox_dispatcher() -> OutboxDispatcher:
                 EventType.SubscribeDeleted,
                 message.payload,
             ),
+            "subscribe.deleted.report": _dispatch_subscribe_deleted_report,
             "download.added": lambda message: EventManager().send_event(
                 EventType.DownloadAdded,
                 restore_download_added(message.payload),
