@@ -2394,6 +2394,12 @@ class MoviePilotAgent:
         发送 Agent 消息；后台任务不绑定原渠道，交由通知链广播。
         """
         broadcast = self.is_background
+        rich_message = (
+            message
+            if not broadcast
+            and self.channel == NotificationChannel.Telegram.value
+            else None
+        )
         self._save_assistant_display_message_once(message)
         await AgentChain().async_post_message(
             Message(
@@ -2406,6 +2412,7 @@ class MoviePilotAgent:
                 original_chat_id=None if broadcast else self.original_chat_id,
                 title=title,
                 text=message,
+                rich_message=rich_message,
                 save_history=False,
             )
         )
