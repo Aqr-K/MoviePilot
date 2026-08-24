@@ -121,6 +121,18 @@ def prepare_database(*, before_alembic: Callable[[], None] | None = None) -> Non
     update_db(alembic_cfg)
 
 
+def verify_database_revision() -> None:
+    """确认活动数据库已位于当前唯一 Alembic head，否则阻止 readiness。"""
+    engine = get_engine()
+    alembic_cfg = _build_alembic_config(engine)
+    _, current_heads, target_heads = _migration_state(engine, alembic_cfg)
+    if set(current_heads) != set(target_heads):
+        raise RuntimeError(
+            "数据库迁移完成后 revision 仍未到达当前 head："
+            f"current={current_heads}, target={target_heads}"
+        )
+
+
 def init_db():
     """
     初始化数据库
