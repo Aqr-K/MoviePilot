@@ -416,6 +416,58 @@ PoC 已证明核心命题：一个**既不 sleep 也不做 IO 的死循环插件
 
 ---
 
+## 六ter、单核满载的确诊结果（2026-08-24）
+
+Track A0 主张「先确诊，别赌」。生产反馈**单核 CPU 持续 100%**（持续而非周期尖峰）
+后，三路并行排查（忙循环猎捕 / SSE 轮询开销 / 后台常驻任务）给出了结论。
+
+**先缩小范围的推论**：Python 单进程受 GIL 约束最多占满一个核。「单核满载且不再上涨」
+必然意味着**有一个线程在持续执行纯 Python 字节码**——IO 等待不吃 CPU，Rust 加速器
+会释放 GIL。所以这不是「负载重需要更多核」，而是**某处在空转**。加机器、开多进程
+都治不了，只会让每个 worker 各烧一个核。
+
+### 根因：随机壁纸无界自旋（上游缺陷）
+
+`app/application/orchestration/tmdb.py` 的 `get_random_wallpager` 与
+`async_get_random_wallpager` 以 `while True` + `random.choice` 反复抽取，直到抽中带
+`backdrop_path` 的条目。趋势榜整页不带该字段时循环没有退出条件、不休眠、不做 IO。
+
+- `media_type=person` 的条目天然没有背景图；TMDB 反代裁剪载荷时会整页缺失。
+- 入口 `GET /login/wallpaper` **公开未鉴权**且是同步路由，跑在 anyio 线程池上会
+  **永久占用一个 worker 且无法取消**；`@cached` 无 single-flight，登录页每刷新一次
+  就再多一个自旋线程。异步孪生版本直接卡死事件循环。
+- `git log -S` 追溯到 2023-09-22 提交 `838048fd8`，`upstream/v2` 的
+  `app/chain/tmdb.py:153` 与 `:309` 至今仍在。**这是上游缺陷，非本 fork 引入。**
+
+### 三个放大器
+
+| 项 | 位置 | 机制 |
+|---|---|---|
+| 目录监控轮询 | `app/monitor/watcher.py` | 轮询模式每间隔递归 stat 整棵目录树；该模式恰恰只在大媒体库触发（兼容模式 / 目录数接近 inotify 上限）。原 300ms 是上游为小型开发目录调的默认值 |
+| 日志等级闸门击穿 | `app/runtime/log.py` | 精确闸写作 `if plugin_id and ...`，宿主日志无精确闸，只受「最宽松一档」下限约束。任一插件开 DEBUG，全进程 `logger.debug()` 都付 30-80 帧栈回溯并写盘 |
+| 阻塞采样自身开销 | `app/runtime/diagnostics/blocking.py` | 10Hz 调 `traceback.extract_stack`，后者对栈中每个文件做 `os.stat` 并读源码行。**本分支自己引入**，等于在制造它要测量的延迟 |
+
+### 已修（提交 `fe1e049d0`、`eaa6da5d1`）
+
+自旋改为先筛候选再随机选取；采样改为直接沿帧链读代码对象；日志精确闸提到栈回溯
+之前并改读 ContextVar；本地轮询间隔 300ms→2000ms 且新增 `MONITOR_POLL_DELAY_LOCAL`，
+并修正降级路径按目录当前性质重新推导间隔；日志 SSE 增长分支补节流与批量读取。
+
+### 运维侧缓解（无需改代码）
+
+- 壁纸源改为非 `tmdb`，可立即规避根因。
+- 提高宿主机 `fs.inotify.max_user_watches`（建议 524288）避免目录监控降级到轮询。
+- `py-spy dump --pid <PID>` 是定位此类问题的首选：单核满载时那个线程会明确停在
+  某个纯 Python 函数里，不必猜。
+
+### 遗留项
+
+全仓 **448 处 `logger.debug(f"...")`**，f-string 在调用点无条件求值，闸门修复
+消除了栈回溯与写盘成本但消不掉这笔格式化开销。需改为惰性 `%s` 参数或在调用点加
+`isEnabledFor` 守卫，工作量大且分散，未在本轮处理。
+
+---
+
 ## 七、风险与回退
 
 | 风险 | 缓解 |
