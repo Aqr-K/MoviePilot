@@ -253,6 +253,7 @@ def test_lifecycle_manifest_declares_normal_and_safe_mode_order() -> None:
     safe_names = {item["name"] for item in safe}
 
     assert normal_start == [
+        "并发线程槽",
         "数据库准备",
         "HTTP 基础能力",
         "领域依赖装配",
@@ -280,6 +281,7 @@ def test_lifecycle_manifest_declares_normal_and_safe_mode_order() -> None:
         "HTTP 基础能力",
     ]
     assert safe_names == {
+        "并发线程槽",
         "数据库准备",
         "HTTP 基础能力",
         "领域依赖装配",

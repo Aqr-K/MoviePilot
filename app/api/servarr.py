@@ -20,6 +20,7 @@ from app.domain.metainfo import MetaInfo
 from app.application.servarr import ServarrSubscription, ServarrSubscriptionService
 from app.adapters.web.security.access import verify_apikey
 from app.api.deps import get_servarr_subscription_service
+from app.runtime.execution import run_in_threadpool
 from app.schemas.servarr import RadarrMovie
 from app.schemas.servarr import SonarrSeries
 from app.schemas.types import MediaSource, MediaType
@@ -39,7 +40,7 @@ def _subscribe_tmdb_id(subscribe: ServarrSubscription) -> int | None:
     return None
 
 
-def _resolve_series_media(
+async def _resolve_series_media(
     tvdbid: Optional[int] = None,
     title: Optional[str] = None,
     year: Optional[str | int] = None,
@@ -47,7 +48,7 @@ def _resolve_series_media(
     """按 TVDB ID 或标题解析剧集媒体信息，用于补全 Seerr 请求体中缺失的媒体身份。"""
     meta = None
     if tvdbid:
-        tvdbinfo = MediaChain().tvdb_info(tvdbid=tvdbid)
+        tvdbinfo = await run_in_threadpool(MediaChain().tvdb_info, tvdbid=tvdbid)
         if tvdbinfo and tvdbinfo.get("name"):
             meta = MetaInfo(tvdbinfo.get("name"))
     if not meta and title:
@@ -57,7 +58,7 @@ def _resolve_series_media(
     meta.type = MediaType.TV
     if year:
         meta.year = year
-    return MediaChain().recognize_by_meta(meta, obtain_images=False)
+    return await MediaChain().async_recognize_by_meta(meta, obtain_images=False)
 
 
 @arr_router.get(
@@ -789,7 +790,7 @@ async def arr_add_series(
     # 请求体季列表由 lookup 返回的季列表构造，lookup 季列表为空时请求体也会为空，此时按识别季集兜底
     mediainfo = None
     if not tv.tmdbId or not tv.seasons:
-        mediainfo = _resolve_series_media(
+        mediainfo = await _resolve_series_media(
             tvdbid=tv.tvdbId, title=tv.title, year=tv.year
         )
         if not tv.tmdbId:

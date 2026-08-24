@@ -759,7 +759,9 @@ async def proxy_img(
     """
     allowed_domains = set(settings.SECURITY_IMAGE_DOMAINS)
     cookies = (
-        MediaServerChain().get_image_cookies(server=None, image_url=imgurl)
+        await anyio.to_thread.run_sync(
+            MediaServerChain().get_image_cookies, None, imgurl
+        )
         if use_cookies
         else None
     )

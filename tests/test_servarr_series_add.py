@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
+from app.api import servarr as servarr_module
 from app.api.servarr import arr_add_series, arr_series_lookup
 from app.schemas import SonarrSeason, SonarrSeries
 from app.schemas.types import MediaSource, MediaType
@@ -63,7 +64,7 @@ def _patch_chains(mediainfo=None, exists=None, add_result=(123, "")):
         "seasons": [{"type": {"id": "default"}, "number": 1}],
         "defaultSeasonType": "default",
     }
-    media_chain.recognize_by_meta.return_value = mediainfo
+    media_chain.async_recognize_by_meta = AsyncMock(return_value=mediainfo)
     subscribe_chain = MagicMock()
     subscribe_chain.async_add = AsyncMock(return_value=add_result)
     subscriptions = MagicMock()
@@ -139,6 +140,37 @@ def test_add_series_identity_resolution_failure_returns_500():
             _run_add(tv, subscriptions)
 
     assert excinfo.value.status_code == 500
+
+
+def test_resolve_series_media_offloads_tvdb_lookup_and_uses_async_recognition():
+    """TVDB 查询没有异步版本必须卸载到线程池，媒体识别必须走异步版本，避免阻塞事件循环。"""
+    media_chain = MagicMock()
+    media_chain.tvdb_info.return_value = {
+        "name": "Tales of Herding Gods",
+        "seasons": [{"type": {"id": "default"}, "number": 1}],
+        "defaultSeasonType": "default",
+    }
+    mediainfo = _fake_mediainfo()
+    media_chain.async_recognize_by_meta = AsyncMock(return_value=mediainfo)
+    offloaded_calls = []
+
+    async def fake_run_in_threadpool(func, *args, **kwargs):
+        offloaded_calls.append((func, args, kwargs))
+        return func(*args, **kwargs)
+
+    with patch("app.api.servarr.MediaChain", return_value=media_chain), patch.object(
+        servarr_module, "run_in_threadpool", fake_run_in_threadpool
+    ):
+        result = asyncio.run(
+            servarr_module._resolve_series_media(
+                tvdbid=_TVDB_ID, title=None, year=2024
+            )
+        )
+
+    assert result is mediainfo
+    assert offloaded_calls == [(media_chain.tvdb_info, (), {"tvdbid": _TVDB_ID})]
+    media_chain.async_recognize_by_meta.assert_awaited_once()
+    media_chain.recognize_by_meta.assert_not_called()
 
 
 def test_series_lookup_falls_back_to_tmdb_seasons():

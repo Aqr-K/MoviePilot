@@ -22,6 +22,7 @@ from app.api.principal import ApiPrincipal
 from app.application.configuration import get_configured_system_config
 from app.api.deps import get_current_active_superuser, get_message_query_service
 from app.application.messaging.message import MessageQueryService
+from app.runtime.execution import run_in_threadpool
 from app.runtime.extensions.service_config import ServiceConfigHelper
 from app.runtime.log import logger
 from app.adapters.external.wechat_crypt import WXBizMsgCrypt
@@ -176,7 +177,8 @@ async def web_message(
             elif isinstance(images, str):
                 images = [images]
 
-    MessageChain().handle_message(
+    await run_in_threadpool(
+        MessageChain().handle_message,
         channel=NotificationChannel.Web,
         source=current_user.name,
         userid=current_user.name,

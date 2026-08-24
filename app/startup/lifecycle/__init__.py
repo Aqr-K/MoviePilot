@@ -51,6 +51,7 @@ from app.startup.scheduler_initializer import (
     init_plugin_scheduler,
 )
 from app.db import check_connection_budget, get_engine, get_global_async_engine
+from app.runtime.thread import configure_default_thread_limiter
 from app.startup.transfer_initializer import replay_pending_transfers
 from app.startup.workflow_initializer import init_workflow, stop_workflow
 from app.startup.lifecycle.components import (
@@ -152,6 +153,12 @@ def prepare_database_component(app: FastAPI) -> None:
 def build_lifecycle_components(app: FastAPI) -> tuple[LifecycleComponent, ...]:
     """按现有顺序构建应用组件清单，回调在每次 lifespan 启动时重新绑定。"""
     return (
+        LifecycleComponent(
+            name="并发线程槽",
+            start=configure_default_thread_limiter,
+            start_order=1,
+            start_timeout_seconds=10,
+        ),
         LifecycleComponent(
             name="数据库准备",
             start=lambda: prepare_database_component(app),

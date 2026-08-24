@@ -134,6 +134,10 @@ class ConfigModel(BaseModel):
     # （uvicorn.Config 的 workers 仅在多进程 supervisor 路径下生效），
     # 调大此项前需先解决调度器会在每个 worker 内重复执行的问题
     API_WORKERS: int = Field(default=1, ge=1)
+    # anyio 默认线程槽上限。FastAPI 同步路由（`def` 而非 `async def`）与
+    # run_in_threadpool/to_thread 卸载共用这一槽位，默认值 0 表示跟随
+    # `CONF.threadpool`；大于 0 时按此值显式覆盖
+    API_THREAD_LIMIT: int = Field(default=0, ge=0)
     DB_TYPE: str = "sqlite"
     # 是否在控制台输出 SQL 语句，默认关闭
     DB_ECHO: bool = False

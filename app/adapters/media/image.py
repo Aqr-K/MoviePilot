@@ -12,6 +12,7 @@ from app.foundation.singleton import Singleton
 from app.foundation.url import sanitize_path
 from app.runtime.cache import FileCache, AsyncFileCache
 from app.runtime.config import settings
+from app.runtime.execution import run_in_threadpool
 from app.runtime.log import logger
 
 
@@ -173,7 +174,9 @@ class ImageHelper(metaclass=Singleton):
         if use_cache:
             content = await self.async_file_cache.get(cache_path, region="images")
             if content:
-                mime_type = self.get_image_mime_type(content, verify=False)
+                mime_type = await run_in_threadpool(
+                    self.get_image_mime_type, content, verify=False
+                )
                 if mime_type:
                     return content, mime_type
 
@@ -185,7 +188,7 @@ class ImageHelper(metaclass=Singleton):
             return None
 
         content = response.content
-        mime_type = self.get_image_mime_type(content)
+        mime_type = await run_in_threadpool(self.get_image_mime_type, content)
         if not mime_type:
             return None
 
