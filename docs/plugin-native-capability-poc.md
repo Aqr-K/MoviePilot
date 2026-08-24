@@ -3,7 +3,7 @@
 ## 验证的问题
 
 插件提供的模块能否像 `app/modules/` 下的内置模块一样，被能力注册表发现、被
-Capability Runtime 装载、参与三级分发（广播/多播/单播/管道）。样本用
+Capability Runtime 装载、参与四原语分发（广播/多播/单播/管道）。样本用
 `app/modules/rclone/` 复制出一个插件形态的存储扩展来验证，`app/modules/rclone/`
 本身未做任何改动。
 

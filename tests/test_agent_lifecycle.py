@@ -10,6 +10,12 @@ from app.agent.memory import MemoryManager
 from app.startup import agent_initializer, modules_initializer
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    """限定异步用例使用项目 Agent 运行时采用的 asyncio 后端。"""
+    return "asyncio"
+
+
 @pytest.mark.anyio
 async def test_agent_entrypoint_initializes_on_calling_loop(monkeypatch) -> None:
     """Agent 启动入口必须在应用主循环完成初始化。"""

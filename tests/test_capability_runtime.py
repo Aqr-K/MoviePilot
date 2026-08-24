@@ -3,13 +3,17 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+import time
 import types
 from collections.abc import Iterator
+from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import AsyncMock, patch
 
+import anyio
+import anyio.to_thread
 import pytest
 
 from app.runtime.capabilities.errors import (
@@ -960,3 +964,34 @@ def test_adapter_mode_requires_declared_enum_member(tmp_path: Path) -> None:
 
     with pytest.raises(CapabilityAdapterModeError):
         runtime.activate("sample.capability", reason="invalid_mode")
+
+
+@pytest.mark.asyncio
+async def test_wait_async_waiters_do_not_starve_shared_thread_pool() -> None:
+    """并发等待同一个 inflight future 的调用者数量远超 anyio 默认线程池容量时，
+    完成该 future 同样需要从这个池取执行位也必须成功返回，不得互相饿死。"""
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    waiter_count = limiter.total_tokens + 160
+
+    shared_future: "Future[int]" = Future()
+
+    waiter_tasks = [
+        asyncio.create_task(CapabilityRuntime._wait_async(shared_future))
+        for _ in range(waiter_count)
+    ]
+
+    # 给等待者足够时间真正进入等待路径；旧实现会在此把线程池令牌占满。
+    deadline = time.monotonic() + 0.5
+    while limiter.borrowed_tokens < limiter.total_tokens and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+
+    owner_task = asyncio.create_task(
+        anyio.to_thread.run_sync(shared_future.set_result, 42)
+    )
+
+    results = await asyncio.wait_for(
+        asyncio.gather(*waiter_tasks, owner_task),
+        timeout=10,
+    )
+
+    assert results[:-1] == [42] * waiter_count

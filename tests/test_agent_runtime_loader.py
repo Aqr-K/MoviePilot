@@ -20,6 +20,12 @@ from app.runtime.capabilities.model import (
 
 
 @pytest.fixture
+def anyio_backend() -> str:
+    """限定异步用例使用项目 Agent 运行时采用的 asyncio 后端。"""
+    return "asyncio"
+
+
+@pytest.fixture
 def runtime_loader(monkeypatch):
     """为每个用例提供未构建、未关闭的 Agent Capability Runtime。"""
     from app.agent import runtime_loader as module

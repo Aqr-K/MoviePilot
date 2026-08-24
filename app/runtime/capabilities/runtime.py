@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import inspect
 import sys
 import threading
@@ -8,8 +7,13 @@ import time
 from collections import deque
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from functools import partial
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Optional
+
+import anyio.from_thread
+import anyio.lowlevel
+import anyio.to_thread
 
 from app.runtime.capabilities.errors import (
     CapabilityAdapterContractError,
@@ -142,7 +146,27 @@ class CapabilityRuntime:
 
     @staticmethod
     async def _wait_async(future: Future[Any]) -> Any:
-        return await asyncio.shield(asyncio.wrap_future(future))
+        """在事件循环内等待 Future 完成，不占用工作线程。
+
+        :param future: 由持有 inflight 操作的一方负责完成的 Future
+        :return: Future 的结果，异常原样传播
+        """
+        event = anyio.Event()
+        token = anyio.lowlevel.current_token()
+        waiter_thread_id = threading.get_ident()
+
+        def _signal(_: "Future[Any]") -> None:
+            # 已完成的 Future 会在注册回调的当前线程上立即回调，直接置位即可；
+            # 其余情况由完成方线程跨线程唤醒事件循环。
+            if threading.get_ident() == waiter_thread_id:
+                event.set()
+            else:
+                anyio.from_thread.run_sync(event.set, token=token)
+
+        future.add_done_callback(_signal)
+        with anyio.CancelScope(shield=True):
+            await event.wait()
+        return future.result()
 
     def _emit(
         self,
@@ -1369,9 +1393,6 @@ class CapabilityRuntime:
             if getattr(adapter, "execution_mode", None) is AdapterExecutionMode.ASYNC:
                 await self._stop_async(spec.id, reason=reason, shutdown=True)
             else:
-                await asyncio.to_thread(
-                    self._stop_sync,
-                    spec.id,
-                    reason=reason,
-                    shutdown=True,
+                await anyio.to_thread.run_sync(
+                    partial(self._stop_sync, spec.id, reason=reason, shutdown=True)
                 )

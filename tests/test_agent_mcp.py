@@ -64,6 +64,12 @@ def _write_stdio_mcp_server(tmp_path):
     return server_path
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    """限定异步用例使用项目 Agent 运行时采用的 asyncio 后端。"""
+    return "asyncio"
+
+
 @pytest.mark.anyio
 async def test_stdio_mcp_server_lists_tools(tmp_path):
     """stdio MCP 服务器应能被初始化并读取工具列表。"""

@@ -297,6 +297,12 @@ def test_delete_rejects_running_task_and_removes_all_history() -> None:
     assert oper.get_run(run.run_id) is None
 
 
+@pytest.fixture
+def anyio_backend() -> str:
+    """限定异步用例使用项目 Agent 运行时采用的 asyncio 后端（run_agent_blocking 依赖 asyncio.Semaphore）。"""
+    return "asyncio"
+
+
 @pytest.mark.anyio
 async def test_query_task_returns_owner_scoped_ten_recent_runs(monkeypatch) -> None:
     """单任务查询只向 owner 返回最近十次运行，列表查询不携带历史。"""

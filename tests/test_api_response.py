@@ -644,6 +644,8 @@ def test_openapi_success_models_have_no_implicit_empty_nested_schemas():
         "CookieDecryptedPayload",
         # 通用管理请求的 params 按设计透传模块个性化参数。
         "ManageRequest",
+        # 服务实例配置写入载荷按设计透传各族配置模型自定义的顶层字段，由宿主筛选消费。
+        "ServiceInstanceConfigPayload",
         # 通用管理响应的 data 为模块自定义结构，按设计不固定字段。
         "Response_Dict_str__Any__",
         # LLM 提供商管理响应的 data 目录查询为列表、其余动作为映射。

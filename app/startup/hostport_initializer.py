@@ -6,6 +6,7 @@
 """
 
 from functools import lru_cache
+from typing import List, Optional, Tuple
 
 from app.runtime.hostports.diagnostics import DiagnosticsProvider, diagnostics_port
 from app.runtime.hostports.directories import DirectoryConfigProvider, directory_config_port
@@ -46,11 +47,31 @@ def _get_media_transfer() -> MediaTransferProvider:
     return TransHandler()
 
 
+class _SiteResourceAdapter:
+    """规整编译态 SitesHelper 的返回值，使其满足端口 ``Optional[dict]`` 契约。
+
+    ``SitesHelper.get_indexer`` 对未命中域名返回 ``{}`` 而非 ``None``；这里在组合根边界
+    补齐语义，调用方按端口声明用 ``is None``/真值判断都能拿到一致结果。
+    """
+
+    def __init__(self, helper) -> None:
+        self._helper = helper
+
+    def get_indexers(self) -> List[dict]:
+        return self._helper.get_indexers()
+
+    def get_indexer(self, domain: str) -> Optional[dict]:
+        return self._helper.get_indexer(domain) or None
+
+    def check(self, domain: str) -> Tuple[bool, str]:
+        return self._helper.check(domain)
+
+
 def _get_site_resource() -> SiteResourceProvider:
     """首个站点资源查询才导入站点服务。"""
     from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
 
-    return SitesHelper()
+    return _SiteResourceAdapter(SitesHelper())
 
 
 def _get_filter_rule_group() -> FilterRuleGroupProvider:
