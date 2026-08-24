@@ -11,7 +11,9 @@ from app.api.data import configure_api_data_ports
 from app.application.agentdata import configure_agent_data_ports
 from app.application.configuration import (
     SystemConfigService,
+    TransferRetryConfig,
     configure_system_config,
+    configure_transfer_retry_config,
 )
 from app.application.history import configure_transfer_history_provider
 from app.application.messaging.chat import (
@@ -52,6 +54,7 @@ from app.db.oper.userconfig import UserConfigOper
 from app.db.oper.workflow import WorkflowOper
 from app.db.session import SessionFactory, async_session_scope, get_async_db, get_db
 from app.db.uow import SqlAlchemyAsyncUnitOfWork, SqlAlchemyUnitOfWork
+from app.runtime.config import settings
 
 
 def configure_request_data_ports() -> None:
@@ -124,6 +127,11 @@ def configure_application_service_ports() -> None:
     """登记跨请求复用的单例应用服务，供无请求会话的调用方取用。"""
     users = UserOper()
     configure_system_config(SystemConfigService(repository=SystemConfigOper()))
+    configure_transfer_retry_config(
+        lambda: TransferRetryConfig(
+            max_failed_retries=settings.TRANSFER_MAX_FAILED_RETRIES,
+        )
+    )
     configure_site_query_service(SiteQueryService(repository=SiteOper()))
     configure_agent_chat_service(AgentChatService(repository=AgentChatOper()))
     configure_user_configuration(

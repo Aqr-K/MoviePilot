@@ -28,12 +28,18 @@ def configure_plugin_system_services():
         decode_access_token,
     )
     from app.api.data import configure_api_data_ports
-    from app.application.configuration import SystemConfigService, configure_system_config
+    from app.application.configuration import (
+        SystemConfigService,
+        TransferRetryConfig,
+        configure_system_config,
+        configure_transfer_retry_config,
+    )
     from app.application.service_config import (
         ServiceInstanceConfigService,
         configure_service_instance_configs,
         get_configured_service_instance_configs,
     )
+    from app.runtime.config import settings
     from app.db.session import (
         SessionFactory,
         async_session_scope,
@@ -49,6 +55,11 @@ def configure_plugin_system_services():
 
     configure_token_codec(create_access_token, decode_access_token)
     configure_system_config(SystemConfigService(repository=SystemConfigOper()))
+    configure_transfer_retry_config(
+        lambda: TransferRetryConfig(
+            max_failed_retries=settings.TRANSFER_MAX_FAILED_RETRIES,
+        )
+    )
     configure_service_instance_configs(
         ServiceInstanceConfigService(repository=ServiceConfigOper())
     )
