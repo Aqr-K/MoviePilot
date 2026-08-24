@@ -7,7 +7,7 @@ api / application / agent / workflow 各层只声明持久化端口，具体 Ope
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from app.api.data import configure_api_data_ports
 from app.application.agentdata import configure_agent_data_ports
@@ -45,6 +45,10 @@ from app.application.security.userconfig import (
     configure_user_configuration,
 )
 from app.application.site.query import SiteQueryService, configure_site_query_service
+from app.application.subscription.complete import (
+    CompleteSubscriptionCommand,
+    configure_subscription_completion_scope,
+)
 from app.application.subscription.delete import (
     DeleteSubscribeCommand,
     configure_delete_subscribe_scope,
@@ -171,6 +175,11 @@ async def _publish_subscribe_deleted(payload: dict) -> None:
     await EventManager().async_send_event(EventType.SubscribeDeleted, payload)
 
 
+def _publish_subscribe_completed(payload: dict) -> None:
+    """通过宿主事件总线发布已提交的订阅完成事件。"""
+    EventManager().send_event(EventType.SubscribeComplete, payload)
+
+
 @asynccontextmanager
 async def _subscription_mutation_scope():
     """为 Agent 等非 HTTP 入口创建独占订阅修改会话、事务与 outbox。"""
@@ -197,10 +206,26 @@ async def _delete_subscribe_scope():
         )
 
 
+@contextmanager
+def _subscription_completion_scope():
+    """为同步完成链创建独占 Session、UoW 与 durable outbox。"""
+    session = SessionFactory()
+    try:
+        yield CompleteSubscriptionCommand(
+            repository=SubscribeOper(session),
+            unit_of_work=SqlAlchemyUnitOfWork(session),
+            outbox=SqlAlchemyOutboxRepository(session),
+            publish=_publish_subscribe_completed,
+        )
+    finally:
+        session.close()
+
+
 def configure_transactional_subscription_scopes() -> None:
     """登记 Agent 等非 HTTP 入口复用的订阅修改与删除事务作用域。"""
     configure_subscription_mutation_scope(_subscription_mutation_scope)
     configure_delete_subscribe_scope(_delete_subscribe_scope)
+    configure_subscription_completion_scope(_subscription_completion_scope)
 
 
 def _dispatch_subscribe_deleted_report(message) -> None:
@@ -209,6 +234,14 @@ def _dispatch_subscribe_deleted_report(message) -> None:
         message.payload.get("subscribe_info") or {}
     ):
         raise RuntimeError("订阅删除统计上报未确认")
+
+
+def _dispatch_subscribe_complete_report(message) -> None:
+    """重放订阅完成统计；未确认时抛错以进入有限重试。"""
+    if not MoviePilotServerHelper.sub_done_durable(
+        message.payload.get("subscribe_info") or {}
+    ):
+        raise RuntimeError("订阅完成统计上报未确认")
 
 
 def _dispatch_subscribe_added_report(message) -> None:
@@ -239,6 +272,11 @@ def _build_outbox_dispatcher() -> OutboxDispatcher:
                 message.payload,
             ),
             "subscribe.deleted.report": _dispatch_subscribe_deleted_report,
+            "subscribe.complete": lambda message: EventManager().send_event(
+                EventType.SubscribeComplete,
+                message.payload,
+            ),
+            "subscribe.complete.report": _dispatch_subscribe_complete_report,
             "download.added": lambda message: EventManager().send_event(
                 EventType.DownloadAdded,
                 restore_download_added(message.payload),
