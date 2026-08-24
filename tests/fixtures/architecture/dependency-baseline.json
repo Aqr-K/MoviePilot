@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7087,
-  "edge_sha256": "aad6922ab51e39d2c0d11e2cfa916702ab6f778d85e9eb3a5f9062753ce2e20b",
+  "edge_count": 7088,
+  "edge_sha256": "50d1b47d497f551a5237b4faac1aae2b7cff149a12cd2a7c507736097161e7f9",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -5972,6 +5972,7 @@
     "app.runtime.extensions.plugin_manager -> app.runtime.deprecation",
     "app.runtime.extensions.plugin_manager -> app.runtime.deprecation.policy",
     "app.runtime.extensions.plugin_manager -> app.runtime.events",
+    "app.runtime.extensions.plugin_manager -> app.runtime.execution",
     "app.runtime.extensions.plugin_manager -> app.runtime.extensions",
     "app.runtime.extensions.plugin_manager -> app.runtime.extensions.admission",
     "app.runtime.extensions.plugin_manager -> app.runtime.extensions.admission.instance_selection",

@@ -1,5 +1,4 @@
 import ast
-import asyncio
 import importlib.util
 import inspect
 import os
@@ -31,6 +30,7 @@ from app.foundation.singleton import Singleton
 from app.foundation.version import compare_version
 from app.runtime.log import bind_plugin_instance, logger
 from app.runtime.config import settings
+from app.runtime.execution import run_in_threadpool_to_completion
 from app.runtime.events import Event, EventHandlerBinding, eventmanager
 from app.runtime.observability import observe_compat_facade, record_metric
 from app.runtime.reload import ConfigReloadMixin
@@ -3316,7 +3316,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
     async def async_run_plugin_method(self, pid: str, method: str, *args, **kwargs) -> Any:
         """
-        异步运行插件方法
+        异步运行插件方法，同步实现经受控线程入口执行
         :param pid: 实例键，或插件ID（按该插件的默认调用目标裁决）
         :param method: 方法名
         :param args: 参数
@@ -3330,10 +3330,9 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         if not hasattr(plugin, method):
             return None
         method_func = getattr(plugin, method)
-        if asyncio.iscoroutinefunction(method_func):
+        if inspect.iscoroutinefunction(method_func):
             return await method_func(*args, **kwargs)
-        else:
-            return method_func(*args, **kwargs)
+        return await run_in_threadpool_to_completion(method_func, *args, **kwargs)
 
     def get_plugin_ids(self) -> List[str]:
         """
