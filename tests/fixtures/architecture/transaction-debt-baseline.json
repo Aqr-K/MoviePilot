@@ -3,10 +3,10 @@
     "by_kind": {
       "async_db_query": 56,
       "async_db_update": 5,
-      "db_query": 88,
+      "db_query": 86,
       "db_update": 12
     },
-    "count": 161,
+    "count": 159,
     "methods": [
       {
         "decorator": "async_db_query",
@@ -27,16 +27,6 @@
         "decorator": "db_query",
         "file": "app/db/models/agentchat.py",
         "method": "AgentChat.list_by_page"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/agenttask.py",
-        "method": "AgentTask.get_for_user"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/agenttask.py",
-        "method": "AgentTask.list_for_user"
       },
       {
         "decorator": "db_query",
