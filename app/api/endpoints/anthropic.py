@@ -3,7 +3,7 @@ import json
 import uuid
 from typing import AsyncIterator, List, Optional
 
-from fastapi import APIRouter, Header, Security
+from fastapi import APIRouter, Depends, Header, Security
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.schemas.openai import AnthropicErrorDetail as _SchemaAnthropicErrorDetail
@@ -25,6 +25,11 @@ from app.api.openai_utils import (
 from app.agent.runtime_loader import get_running_agent_manager
 from app.runtime.config import settings
 from app.adapters.web.security.access import anthropic_api_key_header
+from app.api.context import (
+    get_background_task_registry,
+    resolve_background_task_registry,
+)
+from app.runtime.tasks import TaskRegistry
 
 ANTHROPIC_ERROR_RESPONSES = {
     400: {"model": _SchemaAnthropicErrorResponse, "description": "请求格式错误"},
@@ -88,6 +93,7 @@ async def _stream_anthropic_response(
     user_id: str,
     prompt: str,
     images: List[str],
+    task_registry: TaskRegistry | None = None,
 ) -> AsyncIterator[str]:
     event_queue: asyncio.Queue = asyncio.Queue()
 
@@ -113,7 +119,10 @@ async def _stream_anthropic_response(
         finally:
             await event_queue.put(None)
 
-    task = asyncio.create_task(_run_agent())
+    task = resolve_background_task_registry(task_registry).create(
+        _run_agent(),
+        owner="api.anthropic.stream",
+    )
     try:
         yield f"event: message_start\ndata: {json.dumps({'type': 'message_start', 'message': {'id': message_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': MODEL_ID, 'stop_reason': None, 'stop_sequence': None, 'usage': {'input_tokens': 0, 'output_tokens': 0}}}, ensure_ascii=False)}\n\n"
         yield f"event: content_block_start\ndata: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}}, ensure_ascii=False)}\n\n"
@@ -162,6 +171,7 @@ async def messages(
     payload: _SchemaAnthropicMessagesRequest,
     x_api_key: Optional[str] = Security(anthropic_api_key_header),
     anthropic_version: Optional[str] = Header(default=None, alias="anthropic-version"),
+    task_registry: TaskRegistry = Depends(get_background_task_registry),
 ):
     auth_error = _check_auth(x_api_key)
     if auth_error:
@@ -197,6 +207,7 @@ async def messages(
                 user_id=session_id,
                 prompt=prompt,
                 images=images,
+                task_registry=task_registry,
             ),
             media_type="text/event-stream",
             headers={
