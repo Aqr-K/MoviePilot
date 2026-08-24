@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7082,
-  "edge_sha256": "4f76ccaaf01fbc0875368b379e10538be2c7a298239ce34c42e467c2c37ff562",
+  "edge_count": 7081,
+  "edge_sha256": "e65ac0ac25461d29983728859c06306c485f99ed62b29dce9d0b304b393a5325",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3854,7 +3854,6 @@
     "app.db.oper.passkey -> app.db.base",
     "app.db.oper.passkey -> app.db.models",
     "app.db.oper.passkey -> app.db.models.passkey",
-    "app.db.oper.passkey -> app.db.uow",
     "app.db.oper.pluginconfig -> app.db",
     "app.db.oper.pluginconfig -> app.db.base",
     "app.db.oper.pluginconfig -> app.db.models",

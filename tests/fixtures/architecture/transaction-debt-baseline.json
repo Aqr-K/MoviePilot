@@ -1,12 +1,12 @@
 {
   "model_decorators": {
     "by_kind": {
-      "async_db_query": 13,
+      "async_db_query": 10,
       "async_db_update": 5,
-      "db_query": 20,
+      "db_query": 19,
       "db_update": 12
     },
-    "count": 50,
+    "count": 46,
     "methods": [
       {
         "decorator": "db_query",
@@ -17,26 +17,6 @@
         "decorator": "db_update",
         "file": "app/db/models/downloadfailure.py",
         "method": "DownloadFailure.record_failure"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/passkey.py",
-        "method": "PassKey.async_get_by_credential_id"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/passkey.py",
-        "method": "PassKey.async_get_by_id"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/passkey.py",
-        "method": "PassKey.async_get_by_user_id"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/passkey.py",
-        "method": "PassKey.get_by_id"
       },
       {
         "decorator": "async_db_update",
