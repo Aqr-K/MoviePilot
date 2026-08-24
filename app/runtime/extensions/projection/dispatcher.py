@@ -20,7 +20,13 @@ from app.runtime.extensions.contract.module_method import (
 )
 from app.runtime.extensions.projection.plugin import PluginProviderSource
 from app.runtime.log import logger
+from app.runtime.observability import observe_duration
 from app.schemas.exception import RateLimitExceededException
+
+
+def _provider_type_for(source: ExtensionProviderSource) -> str:
+    """按提供者目录来源归一为低基数 provider_type 标签。"""
+    return "plugin" if isinstance(source, PluginProviderSource) else "system"
 
 
 class ModuleCatalog(Protocol):
@@ -99,13 +105,18 @@ class ModuleInvocationDispatcher:
         result: Any = None
         for source in self._sources:
             source.announce_phase(method)
-            result = self._execute_chain(
-                source.notify_providers(method),
-                method,
-                result,
-                *args,
-                **kwargs,
-            )
+            with observe_duration(
+                "module.provider.duration",
+                method=method,
+                provider_type=_provider_type_for(source),
+            ):
+                result = self._execute_chain(
+                    source.notify_providers(method),
+                    method,
+                    result,
+                    *args,
+                    **kwargs,
+                )
             if self._is_settled(result):
                 break
         return result
@@ -116,13 +127,18 @@ class ModuleInvocationDispatcher:
         result: Any = None
         for source in self._sources:
             source.announce_phase(method)
-            result = await self._async_execute_chain(
-                source.notify_providers(method),
-                method,
-                result,
-                *args,
-                **kwargs,
-            )
+            with observe_duration(
+                "module.provider.duration",
+                method=method,
+                provider_type=_provider_type_for(source),
+            ):
+                result = await self._async_execute_chain(
+                    source.notify_providers(method),
+                    method,
+                    result,
+                    *args,
+                    **kwargs,
+                )
             if self._is_settled(result):
                 break
         return result

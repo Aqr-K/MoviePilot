@@ -14,7 +14,14 @@ from app.runtime.event.registry import EventRegistry
 from app.runtime.execution import run_in_threadpool
 from app.runtime.extensions.contract.instance import split_instance_key
 from app.runtime.log import logger, wrap_for_plugin_instance
+from app.runtime.observability import observe_duration
 from app.schemas.types import EventType
+
+
+def _event_type_label(event: Any) -> str:
+    """把事件类型归一为低基数标签，容忍缺少 event_type 的裸测试替身。"""
+    event_type = getattr(event, "event_type", None)
+    return getattr(event_type, "value", str(event_type))
 
 
 def _bind_instance_context(method: Callable, binding: EventHandlerBinding) -> Callable:
@@ -165,7 +172,12 @@ class EventDispatcher:
                 EventBindingResolver.as_binding_sequence(resolved)
             ):
                 try:
-                    _bind_instance_context(method, binding)(event)
+                    with observe_duration(
+                        "event.handler.duration",
+                        event_type=_event_type_label(event),
+                        handler_type="bound" if class_name else "function",
+                    ):
+                        _bind_instance_context(method, binding)(event)
                 except Exception as err:
                     self._error_handler(
                         event=event,
@@ -184,12 +196,17 @@ class EventDispatcher:
             ):
                 try:
                     bound_method = _bind_instance_context(method, binding)
-                    if inspect.iscoroutinefunction(bound_method):
-                        await bound_method(event)
-                    elif binding.run_sync_in_threadpool or not class_name:
-                        await run_in_threadpool(bound_method, event)
-                    else:
-                        bound_method(event)
+                    with observe_duration(
+                        "event.handler.duration",
+                        event_type=_event_type_label(event),
+                        handler_type="bound" if class_name else "function",
+                    ):
+                        if inspect.iscoroutinefunction(bound_method):
+                            await bound_method(event)
+                        elif binding.run_sync_in_threadpool or not class_name:
+                            await run_in_threadpool(bound_method, event)
+                        else:
+                            bound_method(event)
                 except Exception as err:
                     self._error_handler(
                         event=event,

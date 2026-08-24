@@ -8,6 +8,7 @@ import asyncio
 import inspect
 import multiprocessing
 import threading
+import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -17,6 +18,7 @@ from app.runtime.config import global_vars
 from app.runtime.correlation import call_with_correlation, get_correlation_id
 from app.runtime.events import eventmanager
 from app.runtime.log import logger
+from app.runtime.observability import record_metric
 from app.runtime.progress import AsyncProgressHelper, ProgressHelper
 from app.runtime.scheduling import TimerUtils
 from app.schemas.dashboard import ScheduleInfo as _SchemaScheduleInfo
@@ -143,11 +145,16 @@ class SchedulerEngine:
                 return None
             if job.get("running"):
                 logger.warning(f"定时任务 {job_id} - {job.get('name')} 正在运行 ...")
+                record_metric(
+                    "scheduler.job.overlap_skip",
+                    owner=str(job.get("provider_name", "[系统]")),
+                )
                 return None
             self._jobs[job_id]["running"] = True
             self._jobs[job_id]["last_started_at"] = started_at
             self._jobs[job_id]["last_finished_at"] = None
             self._jobs[job_id]["last_error"] = None
+            self._jobs[job_id]["_metric_started_at"] = time.perf_counter()
         progress = ProgressHelper(self._get_progress_key(job_id))
         progress.start()
         progress.update(
@@ -183,6 +190,14 @@ class SchedulerEngine:
                 job["running"] = False
                 job["last_finished_at"] = finished_at
                 job["last_error"] = error
+                metric_started_at = job.pop("_metric_started_at", None)
+                if metric_started_at is not None:
+                    record_metric(
+                        "scheduler.job.duration",
+                        time.perf_counter() - metric_started_at,
+                        owner=str(job.get("provider_name", "[系统]")),
+                        outcome="success" if success else "error",
+                    )
         job_name = job.get("name") if job else job_id
         # 收尾可能发生在事件循环上（__run_coro_job），使用异步进度后端避免阻塞
         progress = AsyncProgressHelper(self._get_progress_key(job_id))
