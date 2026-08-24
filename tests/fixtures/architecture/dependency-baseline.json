@@ -67,8 +67,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 6905,
-  "edge_sha256": "fd8383c24efec3ab55a2b6a8a669255db725f933dba708877ef4cca970b64e89",
+  "edge_count": 6909,
+  "edge_sha256": "4f4099d1e1c899032351fbdfd0aff96f7b552274cdedfe96676dd53aef95dd17",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -5603,6 +5603,9 @@
     "app.runtime.event.binding -> app.runtime.event",
     "app.runtime.event.binding -> app.runtime.event.registry",
     "app.runtime.event.binding -> app.runtime.log",
+    "app.runtime.event.contracts -> app.schemas",
+    "app.runtime.event.contracts -> app.schemas.event",
+    "app.runtime.event.contracts -> app.schemas.types",
     "app.runtime.event.dispatch -> app.runtime",
     "app.runtime.event.dispatch -> app.runtime.event",
     "app.runtime.event.dispatch -> app.runtime.event.binding",
@@ -5628,6 +5631,7 @@
     "app.runtime.events -> app.runtime.config",
     "app.runtime.events -> app.runtime.event",
     "app.runtime.events -> app.runtime.event.binding",
+    "app.runtime.events -> app.runtime.event.contracts",
     "app.runtime.events -> app.runtime.event.dispatch",
     "app.runtime.events -> app.runtime.event.errors",
     "app.runtime.events -> app.runtime.event.registry",
@@ -6976,7 +6980,7 @@
     "app.workflow.service -> app.schemas.workflow",
     "app.workflow.service -> app.workflow"
   ],
-  "module_count": 873,
+  "module_count": 875,
   "modules": [
     "app",
     "app.adapters",
@@ -7646,6 +7650,7 @@
     "app.runtime.deprecation.policy",
     "app.runtime.event",
     "app.runtime.event.binding",
+    "app.runtime.event.contracts",
     "app.runtime.event.dispatch",
     "app.runtime.event.errors",
     "app.runtime.event.registry",
@@ -7686,6 +7691,7 @@
     "app.runtime.extensions.lifecycle.paths",
     "app.runtime.extensions.lifecycle.storage",
     "app.runtime.extensions.lifecycle.system",
+    "app.runtime.extensions.module.quality",
     "app.runtime.extensions.module_manager",
     "app.runtime.extensions.plugin_manager",
     "app.runtime.extensions.projection",
