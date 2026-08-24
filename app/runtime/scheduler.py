@@ -59,6 +59,7 @@ class ScheduledJob:
     :param provider_name: 作业提供方显示名，缺省由引擎按系统作业展示
     :param manual: 是否只允许手动执行
     :param triggers: 作业展开的调度器触发登记
+    :param timeout_seconds: 协程作业的执行超时秒数，None 表示不限时
     """
 
     id: str
@@ -68,6 +69,7 @@ class ScheduledJob:
     provider_name: Optional[str] = None
     manual: bool = False
     triggers: Tuple[ScheduledTrigger, ...] = ()
+    timeout_seconds: Optional[int] = None
 
 
 class SchedulerEngine:
@@ -115,6 +117,8 @@ class SchedulerEngine:
             state["provider_name"] = job.provider_name
         if job.manual:
             state["manual"] = True
+        if job.timeout_seconds:
+            state["timeout_seconds"] = job.timeout_seconds
         self._jobs[job.id] = state
         for trigger in job.triggers:
             self._scheduler.add_job(
@@ -374,10 +378,18 @@ class SchedulerEngine:
         """
         success = True
         error = None
+        timeout_seconds = job.get("timeout_seconds")
         try:
-            result = await coro
+            if timeout_seconds:
+                result = await asyncio.wait_for(coro, timeout=timeout_seconds)
+            else:
+                result = await coro
             error = self.__get_result_error(result)
             success = error is None
+        except asyncio.TimeoutError as err:
+            success = False
+            error = f"任务执行超时（{timeout_seconds} 秒）"
+            self.__handle_job_error(job_id=job_id, job=job, error=err)
         except asyncio.CancelledError:
             success = False
             error = "任务已取消"

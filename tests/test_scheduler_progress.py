@@ -172,6 +172,34 @@ def test_scheduler_records_cancelled_async_job_as_failed():
     assert progress.error == "任务已取消"
 
 
+def test_scheduler_cancels_coroutine_job_after_declared_timeout():
+    """声明了 timeout_seconds 的协程任务超时后必须被取消并记为失败。"""
+    job_id = f"test-timeout-{uuid4()}"
+    cancelled = asyncio.Event()
+
+    async def task():
+        """模拟只能由取消信号结束的协程任务。"""
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def run_task():
+        job = scheduler._SchedulerEngine__prepare_job(job_id)
+        await scheduler._SchedulerEngine__run_coro_job(task(), job_id, job)
+
+    scheduler = _build_scheduler(job_id, task)
+    scheduler._jobs[job_id]["timeout_seconds"] = 0.01
+    asyncio.run(run_task())
+
+    assert cancelled.is_set()
+    progress = scheduler.get_progress(job_id)
+    assert progress.enable is False
+    assert progress.status == "failed"
+    assert progress.success is False
+    assert "超时" in progress.error
+
+
 def test_scheduler_returns_none_for_unknown_job():
     """未注册且无历史进度的定时服务应返回空。"""
     job_id = f"test-unknown-{uuid4()}"
