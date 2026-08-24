@@ -23,6 +23,7 @@ from app.application.messaging.chat import (
     AgentChatService,
     configure_agent_chat_service,
 )
+from app.application.messaging.gateway import CommandChain
 from app.application.orchestration.data import configure_chain_data_ports
 from app.application.orchestration.durable_events import (
     restore_download_added,
@@ -89,6 +90,7 @@ from app.db.uow import (
 from app.runtime.config import settings
 from app.runtime.events import EventManager
 from app.runtime.observability import record_metric
+from app.schemas.message import Message
 from app.schemas.types import EventType
 
 
@@ -252,6 +254,22 @@ def _dispatch_subscribe_added_report(message) -> None:
         raise RuntimeError("订阅新增统计上报未确认")
 
 
+def _dispatch_subscribe_added_notification(message) -> None:
+    """恢复订阅新增通知；恢复使用提交前冻结的渲染消息快照。"""
+    snapshot = message.payload.get("message") or {}
+    if not isinstance(snapshot, dict):
+        raise RuntimeError("订阅新增通知快照格式无效")
+    CommandChain().post_message(Message.model_validate(snapshot))
+
+
+def _dispatch_subscribe_complete_notification(message) -> None:
+    """恢复订阅完成通知；消息快照无需重建领域对象。"""
+    snapshot = message.payload.get("message") or {}
+    if not isinstance(snapshot, dict):
+        raise RuntimeError("订阅完成通知快照格式无效")
+    CommandChain().post_message(Message.model_validate(snapshot))
+
+
 def _build_outbox_dispatcher() -> OutboxDispatcher:
     """创建一次恢复批次独占的 Session、Repository 和事件 handler。"""
     session = SessionFactory()
@@ -263,6 +281,7 @@ def _build_outbox_dispatcher() -> OutboxDispatcher:
                 message.payload,
             ),
             "subscribe.added.report": _dispatch_subscribe_added_report,
+            "subscribe.added.notification": _dispatch_subscribe_added_notification,
             "subscribe.modified": lambda message: EventManager().send_event(
                 EventType.SubscribeModified,
                 message.payload,
@@ -277,6 +296,7 @@ def _build_outbox_dispatcher() -> OutboxDispatcher:
                 message.payload,
             ),
             "subscribe.complete.report": _dispatch_subscribe_complete_report,
+            "subscribe.complete.notification": _dispatch_subscribe_complete_notification,
             "download.added": lambda message: EventManager().send_event(
                 EventType.DownloadAdded,
                 restore_download_added(message.payload),

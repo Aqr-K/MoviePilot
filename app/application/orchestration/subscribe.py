@@ -40,6 +40,7 @@ from app.application.orchestration.data import (
     SubscribePortProxy as SubscribeOper,
 )
 from app.application.configuration import get_configured_system_config
+from app.application.messaging.message import MessageTemplateHelper
 from app.application.messaging.subscribe import SubscribeInteractionHandler
 from app.application.mediaserver import MediaServerHelper
 from app.application.subscription.write import add_subscribe, async_add_subscribe
@@ -106,6 +107,7 @@ class _SubscribePostCommitContext:
     userid: Optional[str]
     username: Optional[str]
     message: bool
+    notification: Optional[dict] = None
 
 
 def _system_config():
@@ -901,28 +903,46 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
             "description": mediainfo.overview,
         }
 
+    def __build_subscribe_added_notification(
+        self,
+        *,
+        metainfo: MetaBase,
+        mediainfo: MediaInfo,
+        channel: Optional[NotificationChannel],
+        source: Optional[str],
+        userid: Optional[str],
+        username: Optional[str],
+        message: bool,
+    ) -> Optional[dict]:
+        """在事务提交前冻结已渲染的新增通知，供即时发送与 outbox 恢复共用。"""
+        if not message:
+            return None
+        rendered_message = _SchemaMessage(
+            channel=channel,
+            source=source,
+            mtype=MessageType.Subscribe,
+            ctype=ContentType.SubscribeAdded,
+            image=mediainfo.get_message_image(),
+            link=self.__subscribe_added_link(mediainfo.type),
+            userid=userid,
+            username=username,
+        )
+        rendered = MessageTemplateHelper.render(
+            rendered_message,
+            meta=metainfo,
+            mediainfo=mediainfo,
+            username=username,
+        ) or rendered_message
+        return rendered.model_dump(mode="json")
+
     def __post_subscribe_added(
         self,
         subscribe_id: int,
         context: _SubscribePostCommitContext,
     ) -> None:
         """同步执行提交后消息、事件和统计，异常不再触碰数据库事务。"""
-        if context.message:
-            self.post_message(
-                _SchemaMessage(
-                    channel=context.channel,
-                    source=context.source,
-                    mtype=MessageType.Subscribe,
-                    ctype=ContentType.SubscribeAdded,
-                    image=context.mediainfo.get_message_image(),
-                    link=self.__subscribe_added_link(context.mediainfo.type),
-                    userid=context.userid,
-                    username=context.username,
-                ),
-                meta=context.metainfo,
-                mediainfo=context.mediainfo,
-                username=context.username,
-            )
+        if context.notification:
+            self.post_message(_SchemaMessage.model_validate(context.notification))
         eventmanager.send_event(EventType.SubscribeAdded, {
             "subscribe_id": subscribe_id,
             "idempotency_key": (
@@ -943,21 +963,9 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
         context: _SubscribePostCommitContext,
     ) -> None:
         """异步执行提交后消息、事件和统计，保持与同步入口相同顺序。"""
-        if context.message:
+        if context.notification:
             await self.async_post_message(
-                _SchemaMessage(
-                    channel=context.channel,
-                    source=context.source,
-                    mtype=MessageType.Subscribe,
-                    ctype=ContentType.SubscribeAdded,
-                    image=context.mediainfo.get_message_image(),
-                    link=self.__subscribe_added_link(context.mediainfo.type),
-                    userid=context.userid,
-                    username=context.username,
-                ),
-                meta=context.metainfo,
-                mediainfo=context.mediainfo,
-                username=context.username,
+                _SchemaMessage.model_validate(context.notification)
             )
         await eventmanager.async_send_event(EventType.SubscribeAdded, {
             "subscribe_id": subscribe_id,
@@ -1114,6 +1122,15 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
         # 添加订阅
         kwargs.update(self.__get_default_kwargs(mediainfo.type, **kwargs))
 
+        subscribe_notification = self.__build_subscribe_added_notification(
+            metainfo=metainfo,
+            mediainfo=mediainfo,
+            channel=channel,
+            source=source,
+            userid=userid,
+            username=username,
+            message=bool(message),
+        )
         post_commit_context = _SubscribePostCommitContext(
             title=title,
             year=year,
@@ -1127,6 +1144,7 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
             userid=userid,
             username=username,
             message=bool(message),
+            notification=subscribe_notification,
         )
 
         def _after_commit(subscribe_id: int) -> None:
@@ -1139,6 +1157,7 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
             season=season,
             username=username,
             after_commit=_after_commit,
+            notification=subscribe_notification,
             **kwargs,
         )
         if not sid:
@@ -1298,6 +1317,15 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
         # 列新默认参数
         kwargs.update(self.__get_default_kwargs(mediainfo.type, **kwargs))
 
+        subscribe_notification = self.__build_subscribe_added_notification(
+            metainfo=metainfo,
+            mediainfo=mediainfo,
+            channel=channel,
+            source=source,
+            userid=userid,
+            username=username,
+            message=bool(message),
+        )
         post_commit_context = _SubscribePostCommitContext(
             title=title,
             year=year,
@@ -1311,6 +1339,7 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
             userid=userid,
             username=username,
             message=bool(message),
+            notification=subscribe_notification,
         )
 
         async def _after_commit(subscribe_id: int) -> None:
@@ -1326,6 +1355,7 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
             season=season,
             username=username,
             after_commit=_after_commit,
+            notification=subscribe_notification,
             **kwargs,
         )
         if not sid:
@@ -2945,19 +2975,22 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
 
         def notify() -> None:
             """提交成功后发送完成通知，保持历史消息 ABI。"""
-            self.post_message(
-                _SchemaMessage(
-                    mtype=MessageType.Subscribe,
-                    ctype=ContentType.SubscribeComplete,
-                    image=mediainfo.get_message_image(),
-                    link=link,
-                    username=subscribe.username,
-                ),
-                meta=meta,
-                mediainfo=mediainfo,
-                msgstr=msgstr,
-                username=subscribe.username,
-            )
+            self.post_message(completion_message)
+
+        completion_message = _SchemaMessage(
+            mtype=MessageType.Subscribe,
+            ctype=ContentType.SubscribeComplete,
+            image=mediainfo.get_message_image(),
+            link=link,
+            username=subscribe.username,
+        )
+        completion_message = MessageTemplateHelper.render(
+            completion_message,
+            meta=meta,
+            mediainfo=mediainfo,
+            msgstr=msgstr,
+            username=subscribe.username,
+        ) or completion_message
 
         with get_subscription_completion_scope() as command:
             command.execute(
@@ -2965,6 +2998,7 @@ class SubscribeChain(MusicSubscribeMixin, InteractionChainMixin, ChainBase):
                 subscribe_info=subscribe.to_dict(),
                 mediainfo=mediainfo.to_dict(),
                 notify=notify,
+                notification=completion_message.model_dump(mode="json"),
                 report=MoviePilotServerHelper.sub_done_durable,
             )
 
