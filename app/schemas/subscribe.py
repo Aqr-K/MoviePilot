@@ -1,10 +1,20 @@
 import json
+from dataclasses import dataclass
 from typing import Optional, List, Dict, Any, ClassVar
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 
 from app.schemas.media import OptionalMediaIdentityMixin
 from app.schemas.types import MediaSource, MediaType
+
+
+@dataclass(frozen=True, slots=True)
+class SubscribeStageResult:
+    """订阅新增暂存结果，供 Oper 与 Application 端口共用的最小只读状态。"""
+
+    subscribe_id: int
+    message: str
+    created: bool
 
 
 def compute_subscribe_completed_episode(subscribe: "Subscribe") -> Optional[int]:

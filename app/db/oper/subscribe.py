@@ -13,7 +13,6 @@
 """
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any, Tuple, List, Optional
 
 from sqlalchemy import delete as sqlalchemy_delete, select
@@ -23,21 +22,13 @@ from sqlalchemy.orm import Session
 from app.db.base import DbOper
 from app.db.models.subscribe import Subscribe
 from app.db.models.subscribehistory import SubscribeHistory
+from app.schemas.subscribe import SubscribeStageResult
 from app.schemas.types import MediaSource
 
 INTEGER_FLAG_FIELDS = ("best_version", "best_version_full", "search_imdbid", "manual_total_episode")
 
 AfterCommitEffect = Callable[[int], None]
 AsyncAfterCommitEffect = Callable[[int], Awaitable[None]]
-
-
-@dataclass(frozen=True, slots=True)
-class SubscribeStageResult:
-    """Oper 暂存结果，按 Application 端口需要暴露最小只读状态。"""
-
-    subscribe_id: int
-    message: str
-    created: bool
 
 
 def _normalize_integer_flags(payload: dict, fields: Tuple[str, ...] = INTEGER_FLAG_FIELDS) -> dict:

@@ -67,8 +67,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 6904,
-  "edge_sha256": "2efc6c9fb919945ba2bcfcc29daf91026aa21687bdd6972d8a2feb31a969c0da",
+  "edge_count": 6905,
+  "edge_sha256": "fd8383c24efec3ab55a2b6a8a669255db725f933dba708877ef4cca970b64e89",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3776,6 +3776,7 @@
     "app.db.oper.subscribe -> app.db.models.subscribe",
     "app.db.oper.subscribe -> app.db.models.subscribehistory",
     "app.db.oper.subscribe -> app.schemas",
+    "app.db.oper.subscribe -> app.schemas.subscribe",
     "app.db.oper.subscribe -> app.schemas.types",
     "app.db.oper.subscribehistory -> app.db",
     "app.db.oper.subscribehistory -> app.db.base",
