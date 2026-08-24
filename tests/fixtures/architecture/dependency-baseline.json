@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7048,
-  "edge_sha256": "51b5a246053a63d5e9a22eade250573e63b1ac0b30eb6f233819fd705614e66b",
+  "edge_count": 7052,
+  "edge_sha256": "082d3ce1b9db74de46a8c8145c9084d70cd5e5ad5183d4cc356e78f098ac62bf",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -6634,9 +6634,13 @@
     "app.startup.command_initializer -> app.startup",
     "app.startup.command_initializer -> app.startup.bindings",
     "app.startup.command_initializer -> app.startup.bindings.builtin_commands",
+    "app.startup.database_initializer -> app.application",
+    "app.startup.database_initializer -> app.application.transaction",
     "app.startup.database_initializer -> app.db",
     "app.startup.database_initializer -> app.db.engine",
     "app.startup.database_initializer -> app.db.models",
+    "app.startup.database_initializer -> app.db.session",
+    "app.startup.database_initializer -> app.db.uow",
     "app.startup.database_initializer -> app.runtime",
     "app.startup.database_initializer -> app.runtime.config",
     "app.startup.database_initializer -> app.runtime.log",
