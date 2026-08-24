@@ -367,7 +367,7 @@ class AgentImageSupportTest(unittest.TestCase):
         )
 
         with patch(
-            "app.agent.memory.memory_manager.get_agent_messages", return_value=[]
+            "app.agent.memory.memory_manager.async_get_agent_messages", return_value=[]
         ), patch.object(agent, "_execute_agent", new_callable=AsyncMock) as execute_agent:
             import asyncio
 
@@ -405,7 +405,7 @@ class AgentImageSupportTest(unittest.TestCase):
         )
 
         with patch(
-            "app.agent.memory.memory_manager.get_agent_messages", return_value=[]
+            "app.agent.memory.memory_manager.async_get_agent_messages", return_value=[]
         ), patch.object(agent, "_execute_agent", new_callable=AsyncMock) as execute_agent:
             asyncio.run(
                 agent.process(

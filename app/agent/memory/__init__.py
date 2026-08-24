@@ -103,6 +103,42 @@ class MemoryManager:
         self.save_memory(memory)
         return memory.messages
 
+    async def async_get_agent_messages(
+            self, session_id: str, user_id: str
+    ) -> List[BaseMessage]:
+        """
+        异步为Agent获取最近的消息。
+
+        优先使用内存缓存，缓存不存在时从数据库恢复上一轮持久化的原始 messages。
+        """
+        memory = self.get_memory(session_id, user_id)
+        if memory:
+            return memory.messages
+
+        try:
+            chat = await AgentChatOper().async_get(session_id=session_id, user_id=user_id)
+            if not chat:
+                chat = await AgentChatOper().async_get(session_id=session_id)
+        except Exception as e:
+            logger.debug(f"读取持久化Agent会话失败: {e}")
+            return []
+        if not chat or not chat.agent_messages:
+            return []
+
+        try:
+            messages = messages_from_dict(chat.agent_messages)
+        except Exception as e:
+            logger.debug(f"恢复持久化Agent消息失败: {e}")
+            return []
+
+        memory = ConversationMemory(
+            session_id=session_id,
+            user_id=user_id,
+            messages=messages,
+        )
+        self.save_memory(memory)
+        return memory.messages
+
     def save_agent_messages(
             self, session_id: str, user_id: str, messages: List[BaseMessage]
     ):
@@ -120,6 +156,30 @@ class MemoryManager:
         self.save_memory(memory)
         try:
             AgentChatOper().save_agent_messages(
+                session_id=session_id,
+                user_id=user_id,
+                messages=messages_to_dict(messages),
+            )
+        except Exception as e:
+            logger.debug(f"持久化Agent消息失败: {e}")
+
+    async def async_save_agent_messages(
+            self, session_id: str, user_id: str, messages: List[BaseMessage]
+    ) -> None:
+        """
+        异步保存Agent消息到内存缓存与持久化会话表。
+        """
+        memory = self.get_memory(session_id, user_id)
+        if not memory:
+            memory = ConversationMemory(session_id=session_id, user_id=user_id)
+
+        memory.messages = messages
+        memory.updated_at = datetime.now()
+
+        # 更新内存缓存
+        self.save_memory(memory)
+        try:
+            await AgentChatOper().async_save_agent_messages(
                 session_id=session_id,
                 user_id=user_id,
                 messages=messages_to_dict(messages),

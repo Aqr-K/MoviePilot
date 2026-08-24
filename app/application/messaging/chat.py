@@ -71,6 +71,20 @@ class AsyncAgentChatRepository(Protocol):
         """同步保存用户可见会话消息。"""
         ...
 
+    async def async_save_display_messages(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        messages: Optional[list[dict]] = None,
+        username: Optional[str] = None,
+        channel: Optional[Any] = None,
+        source: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
+        client_session_id: Optional[str] = None,
+    ) -> Optional[Any]:
+        """异步保存用户可见会话消息。"""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class AgentChatRecord:
@@ -194,6 +208,31 @@ class AgentChatService:
     ) -> Optional[AgentChatRecord]:
         """同步保存用户可见消息并返回最新投影。"""
         record = self._repository.save_display_messages(
+            session_id=session_id,
+            user_id=user_id,
+            messages=messages,
+            username=username,
+            channel=channel,
+            source=source,
+            original_chat_id=original_chat_id,
+            client_session_id=client_session_id,
+        )
+        return self._project(record) if record is not None else None
+
+    async def save_display(
+        self,
+        *,
+        session_id: str,
+        user_id: Optional[str] = None,
+        messages: Optional[list[dict]] = None,
+        username: Optional[str] = None,
+        channel: Optional[Any] = None,
+        source: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
+        client_session_id: Optional[str] = None,
+    ) -> Optional[AgentChatRecord]:
+        """异步保存用户可见消息并返回最新投影。"""
+        record = await self._repository.async_save_display_messages(
             session_id=session_id,
             user_id=user_id,
             messages=messages,

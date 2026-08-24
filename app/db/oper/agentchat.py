@@ -130,6 +130,62 @@ class AgentChatOper(DbOper):
         self._stage_create(chat)
         return self.get(session_id=session_id, user_id=user_id) or self.get(session_id=session_id)
 
+    async def async_ensure_session(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        username: Optional[str] = None,
+        channel: Optional[ChannelRef] = None,
+        source: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
+        client_session_id: Optional[str] = None,
+    ) -> Optional[AgentChat]:
+        """
+        异步确保 Agent 会话记录存在，并刷新基础渠道信息。
+        """
+        now = self._now()
+        chat = await self.async_get(session_id=session_id, user_id=user_id)
+        if not chat:
+            chat = await self.async_get(session_id=session_id)
+        payload = {
+            "user_id": user_id,
+            "username": username,
+            "channel": channel_identity(channel),
+            "source": source,
+            "original_chat_id": original_chat_id,
+            "client_session_id": client_session_id,
+            "updated_at": now,
+        }
+        payload = {key: value for key, value in payload.items() if value is not None}
+        if chat:
+            await self._stage_async_update(chat, payload)
+            return (
+                await self.async_get(session_id=session_id, user_id=user_id)
+                or await self.async_get(session_id=session_id)
+            )
+
+        chat = AgentChat(
+            session_id=session_id,
+            user_id=user_id,
+            username=username,
+            channel=channel_identity(channel),
+            source=source,
+            original_chat_id=original_chat_id,
+            client_session_id=client_session_id,
+            title=DEFAULT_AGENT_CHAT_TITLE,
+            preview="",
+            agent_messages=[],
+            display_messages=[],
+            message_count=0,
+            created_at=now,
+            updated_at=now,
+        )
+        await self._stage_async_create(chat)
+        return (
+            await self.async_get(session_id=session_id, user_id=user_id)
+            or await self.async_get(session_id=session_id)
+        )
+
     def save_agent_messages(
         self,
         session_id: str,
@@ -147,6 +203,30 @@ class AgentChatOper(DbOper):
         if not chat:
             return
         self._stage_update(
+            chat,
+            {
+                "agent_messages": messages or [],
+                "updated_at": self._now(),
+            },
+        )
+
+    async def async_save_agent_messages(
+        self,
+        session_id: str,
+        user_id: Optional[str],
+        messages: list[dict],
+    ) -> None:
+        """
+        异步保存可恢复 Agent 上下文的原始消息。
+        """
+        chat = await self.async_get(session_id=session_id, user_id=user_id)
+        if not chat:
+            chat = await self.async_get(session_id=session_id)
+        if not chat:
+            chat = await self.async_ensure_session(session_id=session_id, user_id=user_id)
+        if not chat:
+            return
+        await self._stage_async_update(
             chat,
             {
                 "agent_messages": messages or [],
@@ -186,6 +266,45 @@ class AgentChatOper(DbOper):
         if self.has_custom_title(chat.title):
             return
         self._stage_update(
+            chat,
+            {
+                "title": normalized_title,
+                "updated_at": self._now(),
+            },
+        )
+
+    async def async_update_title_if_empty(
+        self,
+        session_id: str,
+        user_id: Optional[str],
+        title: Optional[str],
+        username: Optional[str] = None,
+        channel: Optional[ChannelRef] = None,
+        source: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
+        client_session_id: Optional[str] = None,
+    ) -> None:
+        """
+        异步在会话尚未生成标题时写入标题。
+        """
+        normalized_title = self._normalize_title(title, [])
+        if normalized_title == DEFAULT_AGENT_CHAT_TITLE:
+            return
+
+        chat = await self.async_ensure_session(
+            session_id=session_id,
+            user_id=user_id,
+            username=username,
+            channel=channel,
+            source=source,
+            original_chat_id=original_chat_id,
+            client_session_id=client_session_id,
+        )
+        if not chat:
+            return
+        if self.has_custom_title(chat.title):
+            return
+        await self._stage_async_update(
             chat,
             {
                 "title": normalized_title,
@@ -237,6 +356,53 @@ class AgentChatOper(DbOper):
         )
         return self.get(session_id=session_id, user_id=user_id) or self.get(session_id=session_id)
 
+    async def async_save_display_messages(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        messages: Optional[list[dict]] = None,
+        username: Optional[str] = None,
+        channel: Optional[ChannelRef] = None,
+        source: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
+        client_session_id: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Optional[AgentChat]:
+        """
+        异步保存用户可见的 Agent 会话消息。
+        """
+        normalized_messages = self._normalize_messages(messages)
+        chat = await self.async_ensure_session(
+            session_id=session_id,
+            user_id=user_id,
+            username=username,
+            channel=channel,
+            source=source,
+            original_chat_id=original_chat_id,
+            client_session_id=client_session_id,
+        )
+        if not chat:
+            return None
+        normalized_title = (
+            chat.title
+            if self.has_custom_title(chat.title)
+            else self._normalize_title(title, normalized_messages)
+        )
+        await self._stage_async_update(
+            chat,
+            {
+                "title": normalized_title,
+                "preview": self._normalize_preview(normalized_messages),
+                "display_messages": normalized_messages,
+                "message_count": len(normalized_messages),
+                "updated_at": self._now(),
+            },
+        )
+        return (
+            await self.async_get(session_id=session_id, user_id=user_id)
+            or await self.async_get(session_id=session_id)
+        )
+
     def append_display_messages(
         self,
         session_id: str,
@@ -266,6 +432,46 @@ class AgentChatOper(DbOper):
         display_messages.extend(self._normalize_messages(messages))
         title = chat.title if self.has_custom_title(chat.title) else None
         return self.save_display_messages(
+            session_id=session_id,
+            user_id=user_id,
+            messages=display_messages,
+            username=username or chat.username,
+            channel=channel or chat.channel,
+            source=source or chat.source,
+            original_chat_id=original_chat_id or chat.original_chat_id,
+            client_session_id=client_session_id or chat.client_session_id,
+            title=title,
+        )
+
+    async def async_append_display_messages(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        messages: Optional[list[dict]] = None,
+        username: Optional[str] = None,
+        channel: Optional[ChannelRef] = None,
+        source: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
+        client_session_id: Optional[str] = None,
+    ) -> Optional[AgentChat]:
+        """
+        异步追加一组用户可见的 Agent 会话消息。
+        """
+        chat = await self.async_ensure_session(
+            session_id=session_id,
+            user_id=user_id,
+            username=username,
+            channel=channel,
+            source=source,
+            original_chat_id=original_chat_id,
+            client_session_id=client_session_id,
+        )
+        if not chat:
+            return None
+        display_messages = self._normalize_messages(chat.display_messages)
+        display_messages.extend(self._normalize_messages(messages))
+        title = chat.title if self.has_custom_title(chat.title) else None
+        return await self.async_save_display_messages(
             session_id=session_id,
             user_id=user_id,
             messages=display_messages,

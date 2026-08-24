@@ -19,6 +19,7 @@ from app.api.endpoints.agent import (
     _build_web_agent_message_events,
     _build_web_agent_command_items,
     _build_web_agent_session_id,
+    _build_web_agent_session_id_async,
     _build_web_agent_traditional_callback_payload,
     _build_web_agent_display_message_from_events,
     _collect_web_agent_traditional_events,
@@ -172,6 +173,30 @@ def test_build_web_agent_session_id_reuses_accessible_history():
     configure_agent_chat_service(AgentChatService(repository=AgentChatOper()))
 
     assert _build_web_agent_session_id(user, "telegram-session") == "telegram-session"
+
+
+def test_build_web_agent_session_id_async_reuses_accessible_history():
+    """异步会话解析应通过 Agent 会话应用服务的原生异步查询复用已有历史，不阻塞事件循环。"""
+    user = SimpleNamespace(id=1, name="admin", is_superuser=True)
+    service = SimpleNamespace(
+        get=AsyncMock(
+            return_value=SimpleNamespace(
+                user_id="telegram-user",
+                username="tester",
+            )
+        )
+    )
+
+    with patch(
+        "app.api.endpoints.agent.get_configured_agent_chat_service",
+        return_value=service,
+    ):
+        session_id = asyncio.run(
+            _build_web_agent_session_id_async(user, "telegram-session")
+        )
+
+    assert session_id == "telegram-session"
+    service.get.assert_awaited_once_with("telegram-session")
 
 
 def test_apply_web_agent_display_event_updates_snapshot():
@@ -1128,7 +1153,7 @@ def test_web_agent_stream_emits_heartbeat_during_idle_tool_wait():
         "app.api.endpoints.agent._has_web_agent_traditional_interaction",
         return_value=False,
     ), patch(
-        "app.api.endpoints.agent._build_web_agent_session_id",
+        "app.api.endpoints.agent._build_web_agent_session_id_async",
         return_value="web-agent:heartbeat",
     ), patch.object(
         MessageChain,
@@ -1197,7 +1222,7 @@ def test_web_agent_stop_finishes_stream_without_error():
             "app.api.endpoints.agent._has_web_agent_traditional_interaction",
             return_value=False,
         ), patch(
-            "app.api.endpoints.agent._build_web_agent_session_id",
+            "app.api.endpoints.agent._build_web_agent_session_id_async",
             return_value=session_id,
         ), patch.object(
             MessageChain,
@@ -1306,7 +1331,7 @@ def test_web_agent_traditional_stream_keeps_alive_and_saves_after_done():
             "app.api.endpoints.agent._get_web_agent_unknown_command_message",
             return_value=None,
         ), patch(
-            "app.api.endpoints.agent._build_web_agent_session_id",
+            "app.api.endpoints.agent._build_web_agent_session_id_async",
             return_value="web-agent:traditional-heartbeat",
         ), patch(
             "app.api.endpoints.agent._collect_web_agent_traditional_events",
@@ -1375,7 +1400,7 @@ def test_web_agent_stream_sends_done_before_snapshot_persistence_finishes():
             "app.api.endpoints.agent._has_web_agent_traditional_interaction",
             return_value=False,
         ), patch(
-            "app.api.endpoints.agent._build_web_agent_session_id",
+            "app.api.endpoints.agent._build_web_agent_session_id_async",
             return_value="web-agent:snapshot",
         ), patch.object(
             MessageChain,

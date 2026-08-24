@@ -511,6 +511,31 @@ def _build_web_agent_session_id(user: ApiPrincipal, session_id: Optional[str]) -
     return f"{WEB_AGENT_SESSION_PREFIX}{digest[:32]}"
 
 
+async def _build_web_agent_session_id_async(
+    user: ApiPrincipal,
+    session_id: Optional[str],
+) -> str:
+    """
+    异步构建前端 Agent 会话 ID，历史查询走原生异步路径而非线程池。
+
+    :param user: 当前登录用户
+    :param session_id: 前端传入的会话标识
+    :return: 可用于 Agent 记忆隔离的服务端会话 ID
+    """
+    seed = str(session_id or "").strip() or uuid.uuid4().hex
+    if seed.startswith(WEB_AGENT_SESSION_PREFIX):
+        return seed
+    try:
+        existing_chat = await get_configured_agent_chat_service().get(seed)
+        if existing_chat and AgentChatService.can_access(existing_chat, user):
+            return seed
+    except Exception as e:
+        logger.debug(f"读取WebAgent历史会话失败: {e}")
+    user_part = user.name or str(user.id)
+    digest = hashlib.sha256(f"{user_part}:{seed}".encode("utf-8")).hexdigest()
+    return f"{WEB_AGENT_SESSION_PREFIX}{digest[:32]}"
+
+
 def _can_access_agent_chat(chat: Any, user: ApiPrincipal) -> bool:
     """
     判断当前登录用户是否可以访问指定 Agent 会话。
@@ -718,7 +743,9 @@ def _sanitize_web_agent_upload_name(
     return safe_name
 
 
-def _get_web_agent_upload_dir(user: ApiPrincipal, session_id: Optional[str]) -> Path:
+async def _get_web_agent_upload_dir(
+    user: ApiPrincipal, session_id: Optional[str]
+) -> Path:
     """
     计算当前 Web Agent 会话的临时附件目录。
 
@@ -726,7 +753,7 @@ def _get_web_agent_upload_dir(user: ApiPrincipal, session_id: Optional[str]) -> 
     :param session_id: 前端会话标识
     :return: 已创建的临时附件目录
     """
-    server_session_id = _build_web_agent_session_id(user, session_id)
+    server_session_id = await _build_web_agent_session_id_async(user, session_id)
     safe_session_id = server_session_id.replace(":", "_")
     upload_dir = settings.TEMP_PATH / "agent_uploads" / safe_session_id
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -1669,7 +1696,7 @@ async def upload_web_agent_file(
     """
     mime_type = file.content_type or mimetypes.guess_type(file.filename or "")[0]
     safe_name = _sanitize_web_agent_upload_name(file.filename, mime_type)
-    upload_dir = _get_web_agent_upload_dir(current_user, session_id)
+    upload_dir = await _get_web_agent_upload_dir(current_user, session_id)
     target_path = upload_dir / f"{uuid.uuid4().hex[:8]}_{safe_name}"
     size = await _save_web_agent_upload(file, target_path)
     attachment = _register_web_agent_file(
@@ -1800,7 +1827,9 @@ async def get_agent_chat_session(
     chat = await _get_accessible_agent_chat(service, session_id, current_user)
     server_session_id = session_id
     if not chat:
-        server_session_id = _build_web_agent_session_id(current_user, session_id)
+        server_session_id = await _build_web_agent_session_id_async(
+            current_user, session_id
+        )
         if server_session_id != session_id:
             chat = await _get_accessible_agent_chat(
                 service,
@@ -1916,7 +1945,9 @@ async def stop_web_agent_session_task(
     :param service: Agent 会话应用服务
     :return: 停止结果
     """
-    server_session_id = _build_web_agent_session_id(current_user, session_id)
+    server_session_id = await _build_web_agent_session_id_async(
+        current_user, session_id
+    )
     chat = await _get_accessible_agent_chat(
         service,
         server_session_id,
@@ -1964,7 +1995,9 @@ async def web_agent_stream(
     prompt = payload.text.strip()
     locale = LocaleHelper.get_locale_from_request(request)
     display_prompt = (payload.display_text or payload.text).strip()
-    session_id = _build_web_agent_session_id(current_user, payload.session_id)
+    session_id = await _build_web_agent_session_id_async(
+        current_user, payload.session_id
+    )
     is_secret_confirmation_candidate = (
         prompt in {"确认", "取消"}
         and not payload.images
