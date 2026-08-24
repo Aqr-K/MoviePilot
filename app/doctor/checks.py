@@ -20,6 +20,7 @@ import psutil
 
 from app.runtime.config import settings
 from app.runtime.log import PLUGIN_LOG_FILENAME
+from app.runtime.topology import process_topology_issue
 from app.runtime.compat.plugin_version_readiness import (
     PluginVersionReadiness,
     scan_plugin_version_readiness,
@@ -139,6 +140,7 @@ def default_checks() -> list[CheckFunc]:
     return [
         _check_runtime_paths,
         _check_config,
+        _check_process_topology,
         _check_processes_and_ports,
         _check_dependencies,
         _check_database,
@@ -523,6 +525,49 @@ def _check_config(runner: DoctorRunnerProtocol) -> None:
             detail=f"PROXY_HOST={proxy_host} 未包含 http:// 或 https:// 或 socks5:// 或 socks5h:// 前缀。",
             recommendation="如果外部访问异常，请把 PROXY_HOST 调整为完整 URL。",
         )
+
+
+def _check_process_topology(runner: DoctorRunnerProtocol) -> None:
+    """诊断 API worker 配置是否会复制全功能控制面。"""
+    issue = process_topology_issue(
+        workers=settings.API_WORKERS,
+        safe_mode=settings.MOVIEPILOT_SAFE_MODE,
+    )
+    context = {
+        "api_workers": settings.API_WORKERS,
+        "safe_mode": settings.MOVIEPILOT_SAFE_MODE,
+    }
+    if issue:
+        runner.add(
+            finding_id="startup.process_topology",
+            severity=DoctorSeverity.Error,
+            status=DoctorFindingStatus.Failed,
+            title="进程拓扑不受支持",
+            detail=issue,
+            recommendation="将 API_WORKERS 设为 1 后重启 MoviePilot。",
+            context=context,
+        )
+        return
+    if settings.API_WORKERS != 1:
+        runner.add(
+            finding_id="startup.process_topology",
+            severity=DoctorSeverity.Warn,
+            status=DoctorFindingStatus.Degraded,
+            title="安全模式临时使用多 worker",
+            detail="安全模式不会启动插件、调度器、监控器和工作流，因此当前不会复制完整控制面。",
+            recommendation="故障排除后恢复 API_WORKERS=1，再退出安全模式。",
+            context=context,
+        )
+        return
+    runner.add(
+        finding_id="startup.process_topology",
+        severity=DoctorSeverity.Info,
+        status=DoctorFindingStatus.Ok,
+        title="进程拓扑受支持",
+        detail="API_WORKERS=1，插件和后台任务只会启动一份。",
+        recommendation="保持单 worker；扩容前需要先拆分 API 数据面和控制面。",
+        context=context,
+    )
 
 
 def _check_runtime_file(

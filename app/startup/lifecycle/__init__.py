@@ -27,6 +27,7 @@ except Exception:
 from app.application.orchestration.system import SystemChain
 from app.application.plugin.runtime import get_plugin_manager
 from app.runtime.config import global_vars, settings
+from app.runtime.topology import validate_process_topology
 from app.adapters.external.server import MoviePilotServerHelper
 from app.runtime.state import SystemHelper
 from app.runtime.log import logger, LoggerManager
@@ -285,6 +286,10 @@ async def lifespan(app: FastAPI):
     """
     定义应用的生命周期事件
     """
+    validate_process_topology(
+        workers=settings.API_WORKERS,
+        safe_mode=settings.MOVIEPILOT_SAFE_MODE,
+    )
     print("Starting up...")
     # 存储当前循环
     global_vars.set_loop(asyncio.get_event_loop())

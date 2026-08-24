@@ -1578,181 +1578,93 @@
     "dynamic_consumers": [
       {
         "caller": "app.adapters.system.fsproxy",
-        "line": 392
+        "count": 1
       },
       {
         "caller": "app.agent.llm.provider",
-        "line": 2307
+        "count": 1
       },
       {
         "caller": "app.application.orchestration.transfer",
-        "line": 619
+        "count": 1
       },
       {
         "caller": "app.db.oper.transferpending",
-        "line": 23
+        "count": 1
       },
       {
         "caller": "app.modules._base.storage",
-        "line": 666
+        "count": 1
       },
       {
         "caller": "app.runtime.events",
-        "line": 145
-      },
-      {
-        "caller": "app.runtime.events",
-        "line": 472
-      },
-      {
-        "caller": "app.runtime.events",
-        "line": 476
+        "count": 3
       },
       {
         "caller": "app.runtime.extensions.plugin_manager",
-        "line": 2529
-      },
-      {
-        "caller": "app.runtime.extensions.plugin_manager",
-        "line": 2615
-      },
-      {
-        "caller": "app.runtime.extensions.plugin_manager",
-        "line": 2711
-      },
-      {
-        "caller": "app.runtime.extensions.plugin_manager",
-        "line": 2755
-      },
-      {
-        "caller": "app.runtime.extensions.plugin_manager",
-        "line": 2791
+        "count": 5
       },
       {
         "caller": "app.runtime.extensions.registry.service_family",
-        "line": 155
+        "count": 1
       },
       {
         "caller": "app.startup.hostport_initializer",
-        "line": 113
-      },
-      {
-        "caller": "app.startup.hostport_initializer",
-        "line": 114
-      },
-      {
-        "caller": "app.startup.hostport_initializer",
-        "line": 115
-      },
-      {
-        "caller": "app.startup.hostport_initializer",
-        "line": 116
-      },
-      {
-        "caller": "app.startup.hostport_initializer",
-        "line": 117
-      },
-      {
-        "caller": "app.startup.hostport_initializer",
-        "line": 118
-      },
-      {
-        "caller": "app.startup.hostport_initializer",
-        "line": 119
-      },
-      {
-        "caller": "app.startup.hostport_initializer",
-        "line": 120
-      },
-      {
-        "caller": "app.startup.hostport_initializer",
-        "line": 130
+        "count": 9
       },
       {
         "caller": "app.testing.bootstrap",
-        "line": 111
+        "count": 1
       },
       {
         "caller": "app.workflow",
-        "line": 311
+        "count": 1
       }
     ],
     "dynamic_producers": [
       {
         "caller": "app.agent.tools.impl._filter_rule_utils",
-        "line": 433
+        "count": 1
       },
       {
         "caller": "app.agent.tools.impl.update_system_settings",
-        "line": 289
+        "count": 1
       },
       {
         "caller": "app.api.endpoints.system",
-        "line": 958
-      },
-      {
-        "caller": "app.api.endpoints.system",
-        "line": 1076
-      },
-      {
-        "caller": "app.api.endpoints.system",
-        "line": 1130
-      },
-      {
-        "caller": "app.api.endpoints.system",
-        "line": 1149
+        "count": 4
       },
       {
         "caller": "app.application.orchestration._messaging",
-        "line": 215
-      },
-      {
-        "caller": "app.application.orchestration._messaging",
-        "line": 225
-      },
-      {
-        "caller": "app.application.orchestration._messaging",
-        "line": 331
-      },
-      {
-        "caller": "app.application.orchestration._messaging",
-        "line": 341
+        "count": 4
       },
       {
         "caller": "app.application.orchestration._recognition",
-        "line": 460
-      },
-      {
-        "caller": "app.application.orchestration._recognition",
-        "line": 500
+        "count": 2
       },
       {
         "caller": "app.application.orchestration.user",
-        "line": 160
-      },
-      {
-        "caller": "app.application.orchestration.user",
-        "line": 223
+        "count": 2
       },
       {
         "caller": "app.command",
-        "line": 516
+        "count": 1
       },
       {
         "caller": "app.modules._base.mediaserver",
-        "line": 56
+        "count": 1
       },
       {
         "caller": "app.modules.navidrome",
-        "line": 81
+        "count": 1
       },
       {
         "caller": "app.modules.plex",
-        "line": 85
+        "count": 1
       },
       {
         "caller": "app.runtime.extensions.module_manager",
-        "line": 232
+        "count": 1
       }
     ],
     "event_count": 53,
@@ -1762,7 +1674,7 @@
         "producers": [
           {
             "caller": "app.agent.orchestrator",
-            "line": 1276
+            "count": 1
           }
         ]
       },
@@ -1779,11 +1691,11 @@
         "producers": [
           {
             "caller": "app.command",
-            "line": 282
+            "count": 1
           },
           {
             "caller": "app.modules._base.notification",
-            "line": 99
+            "count": 1
           }
         ]
       },
@@ -1792,7 +1704,7 @@
         "producers": [
           {
             "caller": "app.api.endpoints.discover",
-            "line": 31
+            "count": 1
           }
         ]
       },
@@ -1805,11 +1717,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.media",
-            "line": 1502
-          },
-          {
-            "caller": "app.application.orchestration.media",
-            "line": 2048
+            "count": 2
           }
         ]
       },
@@ -1822,11 +1730,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.media",
-            "line": 815
-          },
-          {
-            "caller": "app.application.orchestration.media",
-            "line": 1753
+            "count": 2
           }
         ]
       },
@@ -1835,11 +1739,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.media",
-            "line": 753
-          },
-          {
-            "caller": "app.application.orchestration.media",
-            "line": 1691
+            "count": 2
           }
         ]
       },
@@ -1848,7 +1748,7 @@
         "producers": [
           {
             "caller": "app.api.deps",
-            "line": 388
+            "count": 1
           }
         ]
       },
@@ -1857,11 +1757,11 @@
         "producers": [
           {
             "caller": "app.api.endpoints.recommend",
-            "line": 42
+            "count": 1
           },
           {
             "caller": "app.workflow.actions.fetch_medias",
-            "line": 111
+            "count": 1
           }
         ]
       },
@@ -1870,7 +1770,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.download",
-            "line": 1057
+            "count": 1
           }
         ]
       },
@@ -1879,7 +1779,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.download",
-            "line": 1424
+            "count": 1
           }
         ]
       },
@@ -1888,11 +1788,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.transfer",
-            "line": 1105
-          },
-          {
-            "caller": "app.application.orchestration.transfer",
-            "line": 1121
+            "count": 2
           }
         ]
       },
@@ -1901,7 +1797,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.subscribe",
-            "line": 2824
+            "count": 1
           }
         ]
       },
@@ -1910,11 +1806,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.subscribe",
-            "line": 3567
-          },
-          {
-            "caller": "app.application.orchestration.subscribe",
-            "line": 3589
+            "count": 2
           }
         ]
       },
@@ -1923,11 +1815,7 @@
         "producers": [
           {
             "caller": "app.application.transferhandler",
-            "line": 985
-          },
-          {
-            "caller": "app.application.transferhandler",
-            "line": 1107
+            "count": 2
           }
         ]
       },
@@ -1936,7 +1824,7 @@
         "producers": [
           {
             "caller": "app.application.transferhandler",
-            "line": 510
+            "count": 1
           }
         ]
       },
@@ -1945,7 +1833,7 @@
         "producers": [
           {
             "caller": "app.application.transferhandler",
-            "line": 1331
+            "count": 1
           }
         ]
       },
@@ -1954,7 +1842,7 @@
         "producers": [
           {
             "caller": "app.application.transferhandler",
-            "line": 1310
+            "count": 1
           }
         ]
       },
@@ -1963,7 +1851,7 @@
         "producers": [
           {
             "caller": "app.workflow.actions.send_event",
-            "line": 46
+            "count": 1
           }
         ]
       },
@@ -1972,7 +1860,7 @@
         "producers": [
           {
             "caller": "app.agent.orchestrator",
-            "line": 870
+            "count": 1
           }
         ]
       },
@@ -1981,7 +1869,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.transfer",
-            "line": 399
+            "count": 1
           }
         ]
       },
@@ -1990,7 +1878,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.transfer",
-            "line": 278
+            "count": 1
           }
         ]
       },
@@ -1998,17 +1886,17 @@
         "consumers": [
           {
             "caller": "app.command",
-            "line": 518
+            "count": 1
           }
         ],
         "producers": [
           {
             "caller": "app.agent.tools.impl.run_slash_command",
-            "line": 86
+            "count": 1
           },
           {
             "caller": "app.application.orchestration.message",
-            "line": 445
+            "count": 1
           }
         ]
       },
@@ -2016,19 +1904,19 @@
         "consumers": [
           {
             "caller": "app.runtime.extensions.module_manager",
-            "line": 58
+            "count": 1
           },
           {
             "caller": "app.runtime.extensions.plugin_manager",
-            "line": 3746
+            "count": 1
           },
           {
             "caller": "app.runtime.reload",
-            "line": 81
+            "count": 1
           },
           {
             "caller": "app.startup.agent_initializer",
-            "line": 122
+            "count": 1
           }
         ],
         "producers": []
@@ -2038,7 +1926,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.download",
-            "line": 1245
+            "count": 1
           }
         ]
       },
@@ -2047,7 +1935,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.download",
-            "line": 2090
+            "count": 1
           }
         ]
       },
@@ -2055,13 +1943,13 @@
         "consumers": [
           {
             "caller": "app.application.orchestration.download",
-            "line": 2074
+            "count": 1
           }
         ],
         "producers": [
           {
             "caller": "app.api.deps",
-            "line": 374
+            "count": 1
           }
         ]
       },
@@ -2074,19 +1962,11 @@
         "producers": [
           {
             "caller": "app.application.messaging.plugin",
-            "line": 414
-          },
-          {
-            "caller": "app.application.messaging.plugin",
-            "line": 445
-          },
-          {
-            "caller": "app.application.messaging.plugin",
-            "line": 475
+            "count": 3
           },
           {
             "caller": "app.application.orchestration.message",
-            "line": 689
+            "count": 1
           }
         ]
       },
@@ -2094,17 +1974,13 @@
         "consumers": [
           {
             "caller": "app.application.orchestration.scraping",
-            "line": 598
+            "count": 1
           }
         ],
         "producers": [
           {
             "caller": "app.application.orchestration._transfer",
-            "line": 465
-          },
-          {
-            "caller": "app.application.orchestration._transfer",
-            "line": 640
+            "count": 2
           }
         ]
       },
@@ -2112,7 +1988,7 @@
         "consumers": [
           {
             "caller": "app.command",
-            "line": 552
+            "count": 1
           }
         ],
         "producers": []
@@ -2121,7 +1997,7 @@
         "consumers": [
           {
             "caller": "app.api.endpoints.agent",
-            "line": 1334
+            "count": 1
           }
         ],
         "producers": []
@@ -2134,13 +2010,13 @@
         "consumers": [
           {
             "caller": "app.scheduler.plugins",
-            "line": 31
+            "count": 1
           }
         ],
         "producers": [
           {
             "caller": "app.runtime.extensions.plugin_manager",
-            "line": 1686
+            "count": 1
           }
         ]
       },
@@ -2152,17 +2028,17 @@
         "consumers": [
           {
             "caller": "app.application.orchestration.search",
-            "line": 2864
+            "count": 1
           },
           {
             "caller": "app.application.orchestration.subscribe",
-            "line": 3044
+            "count": 1
           }
         ],
         "producers": [
           {
             "caller": "app.api.deps",
-            "line": 220
+            "count": 1
           }
         ]
       },
@@ -2171,11 +2047,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.site",
-            "line": 75
-          },
-          {
-            "caller": "app.application.orchestration.site",
-            "line": 164
+            "count": 2
           }
         ]
       },
@@ -2183,29 +2055,21 @@
         "consumers": [
           {
             "caller": "app.application.orchestration.site",
-            "line": 587
-          },
-          {
-            "caller": "app.application.orchestration.site",
-            "line": 629
-          },
-          {
-            "caller": "app.application.orchestration.site",
-            "line": 652
+            "count": 3
           }
         ],
         "producers": [
           {
             "caller": "app.agent.tools.impl.update_site",
-            "line": 200
+            "count": 1
           },
           {
             "caller": "app.api.deps",
-            "line": 215
+            "count": 1
           },
           {
             "caller": "app.application.orchestration.site",
-            "line": 567
+            "count": 1
           }
         ]
       },
@@ -2214,11 +2078,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.subscribe",
-            "line": 1034
-          },
-          {
-            "caller": "app.application.orchestration.subscribe",
-            "line": 1238
+            "count": 2
           }
         ]
       },
@@ -2227,7 +2087,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.subscribe",
-            "line": 2862
+            "count": 1
           }
         ]
       },
@@ -2236,11 +2096,11 @@
         "producers": [
           {
             "caller": "app.agent.tools.impl.delete_subscribe",
-            "line": 70
+            "count": 1
           },
           {
             "caller": "app.api.deps",
-            "line": 86
+            "count": 1
           }
         ]
       },
@@ -2249,19 +2109,11 @@
         "producers": [
           {
             "caller": "app.agent.tools.impl.update_subscribe",
-            "line": 316
+            "count": 1
           },
           {
             "caller": "app.api.endpoints.subscribe",
-            "line": 296
-          },
-          {
-            "caller": "app.api.endpoints.subscribe",
-            "line": 329
-          },
-          {
-            "caller": "app.api.endpoints.subscribe",
-            "line": 389
+            "count": 3
           }
         ]
       },
@@ -2270,7 +2122,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.transfer",
-            "line": 385
+            "count": 1
           }
         ]
       },
@@ -2279,7 +2131,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.transfer",
-            "line": 264
+            "count": 1
           }
         ]
       },
@@ -2288,19 +2140,15 @@
         "producers": [
           {
             "caller": "app.application.orchestration.ports.dispatch",
-            "line": 74
-          },
-          {
-            "caller": "app.application.orchestration.ports.dispatch",
-            "line": 100
+            "count": 2
           },
           {
             "caller": "app.runtime.events",
-            "line": 121
+            "count": 1
           },
           {
             "caller": "app.runtime.scheduler",
-            "line": 297
+            "count": 1
           }
         ]
       },
@@ -2309,7 +2157,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.transfer",
-            "line": 371
+            "count": 1
           }
         ]
       },
@@ -2318,7 +2166,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.transfer",
-            "line": 250
+            "count": 1
           }
         ]
       },
@@ -2327,7 +2175,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.message",
-            "line": 507
+            "count": 1
           }
         ]
       },
@@ -2336,7 +2184,7 @@
         "producers": [
           {
             "caller": "app.application.orchestration.webhook",
-            "line": 29
+            "count": 1
           }
         ]
       },
@@ -2344,13 +2192,13 @@
         "consumers": [
           {
             "caller": "app.workflow.service",
-            "line": 1160
+            "count": 1
           }
         ],
         "producers": [
           {
             "caller": "app.workflow",
-            "line": 379
+            "count": 1
           }
         ]
       }
@@ -2364,7 +2212,7 @@
     "method_count": 0,
     "methods": {}
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "sdk_exports": {
     "app.sdk": [],
     "app.sdk._exports": [],

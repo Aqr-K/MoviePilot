@@ -63,8 +63,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 6867,
-  "edge_sha256": "386464de31c933f100fefdddf958728b5ad79cccc587601d976da77609ee40a6",
+  "edge_count": 6870,
+  "edge_sha256": "e6f977a94c147321305d14532699d92528e84f34fd179ecf77a570f72844f1cf",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -3836,6 +3836,7 @@
     "app.doctor.checks -> app.runtime.compat.plugin_version_readiness",
     "app.doctor.checks -> app.runtime.config",
     "app.doctor.checks -> app.runtime.log",
+    "app.doctor.checks -> app.runtime.topology",
     "app.doctor.formatters -> app.doctor",
     "app.doctor.formatters -> app.doctor.models",
     "app.doctor.runner -> app.adapters",
@@ -3985,6 +3986,7 @@
     "app.main -> app.factory",
     "app.main -> app.runtime",
     "app.main -> app.runtime.config",
+    "app.main -> app.runtime.topology",
     "app.main -> app.startup",
     "app.main -> app.startup.database_initializer",
     "app.modules -> app.runtime",
@@ -6577,6 +6579,7 @@
     "app.startup.lifecycle -> app.runtime.config",
     "app.startup.lifecycle -> app.runtime.log",
     "app.startup.lifecycle -> app.runtime.state",
+    "app.startup.lifecycle -> app.runtime.topology",
     "app.startup.lifecycle -> app.startup",
     "app.startup.lifecycle -> app.startup.cache_initializer",
     "app.startup.lifecycle -> app.startup.command_initializer",
@@ -6934,7 +6937,7 @@
     "app.workflow.service -> app.schemas.workflow",
     "app.workflow.service -> app.workflow"
   ],
-  "module_count": 866,
+  "module_count": 867,
   "modules": [
     "app",
     "app.adapters",
@@ -7681,6 +7684,7 @@
     "app.runtime.scheduling",
     "app.runtime.state",
     "app.runtime.thread",
+    "app.runtime.topology",
     "app.scheduler",
     "app.scheduler.agent_tasks",
     "app.scheduler.composition",
