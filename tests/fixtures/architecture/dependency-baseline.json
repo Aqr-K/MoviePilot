@@ -76,8 +76,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7004,
-  "edge_sha256": "b5b2c2833c888497addf68808e6980eb2f63b86117c0c52be5576a9829f15b3e",
+  "edge_count": 7017,
+  "edge_sha256": "0a9377ed738a5147716959d454f3738ca851354aae95624cc227f9a6b823ad0f",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -4242,6 +4242,19 @@
     "app.modules.bangumi.bangumi -> app.runtime",
     "app.modules.bangumi.bangumi -> app.runtime.cache",
     "app.modules.bangumi.bangumi -> app.runtime.config",
+    "app.modules.dingtalk -> app.domain",
+    "app.modules.dingtalk -> app.domain.context",
+    "app.modules.dingtalk -> app.modules",
+    "app.modules.dingtalk -> app.modules._base",
+    "app.modules.dingtalk -> app.modules.dingtalk.dingtalk",
+    "app.modules.dingtalk -> app.schemas",
+    "app.modules.dingtalk -> app.schemas.message",
+    "app.modules.dingtalk -> app.schemas.types",
+    "app.modules.dingtalk.dingtalk -> app.adapters",
+    "app.modules.dingtalk.dingtalk -> app.adapters.network",
+    "app.modules.dingtalk.dingtalk -> app.adapters.network.http",
+    "app.modules.dingtalk.dingtalk -> app.runtime",
+    "app.modules.dingtalk.dingtalk -> app.runtime.log",
     "app.modules.discord -> app.adapters",
     "app.modules.discord -> app.adapters.network",
     "app.modules.discord -> app.adapters.network.http",
@@ -7084,7 +7097,7 @@
     "app.workflow.service -> app.schemas.workflow",
     "app.workflow.service -> app.workflow"
   ],
-  "module_count": 887,
+  "module_count": 889,
   "modules": [
     "app",
     "app.adapters",
@@ -7595,6 +7608,8 @@
     "app.modules.anilist.anilist",
     "app.modules.bangumi",
     "app.modules.bangumi.bangumi",
+    "app.modules.dingtalk",
+    "app.modules.dingtalk.dingtalk",
     "app.modules.discord",
     "app.modules.discord.discord",
     "app.modules.douban",

@@ -1,0 +1,25 @@
+schema_version = 1
+id = "DingTalkModule"
+kind = "host_module"
+entrypoint = "app.modules.dingtalk:DingTalkModule"
+depends_on = []
+
+[metadata]
+name = "DingTalk"
+service_capability = "notification"
+subtype = "DingTalk"
+priority = 11
+
+[metadata.service_instance]
+multi_instance = true
+
+[activation]
+policy = "when_configured"
+watch = ["Notifications"]
+
+[activation.selector]
+kind = "system_config_item"
+key = "Notifications"
+match_field = "type"
+match_value = "dingtalk"
+enabled_field = "enabled"
