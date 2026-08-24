@@ -6,7 +6,7 @@ from typing import Any, Callable
 from app.application.database import get_database_governance
 from app.application.orchestration.scheduler import SchedulerChain
 from app.application.outbox import dispatch_pending_outbox
-from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
+from app.application.site.sites import SitesHelper  # pylint: disable=import-error,no-name-in-module
 from app.db.oper.systemconfig import SystemConfigOper
 from app.runtime.config import settings
 from app.runtime.extensions.plugin_manager import PluginManager

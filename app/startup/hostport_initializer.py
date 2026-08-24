@@ -69,7 +69,7 @@ class _SiteResourceAdapter:
 
 def _get_site_resource() -> SiteResourceProvider:
     """首个站点资源查询才导入站点服务。"""
-    from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
+    from app.application.site.sites import SitesHelper  # pylint: disable=import-error,no-name-in-module
 
     return _SiteResourceAdapter(SitesHelper())
 

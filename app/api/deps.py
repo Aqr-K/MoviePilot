@@ -62,7 +62,7 @@ from app.runtime.log import logger
 from app.schemas.event import PluginDataResetEventData
 from app.schemas.types import ChainEventType, EventType
 from app.application.scheduling import Scheduler
-from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
+from app.application.site.sites import SitesHelper  # pylint: disable=import-error,no-name-in-module
 from app.domain import site as site_rules
 from app.foundation import url as url_tools
 from app.runtime.config import global_vars

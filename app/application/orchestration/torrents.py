@@ -3,7 +3,7 @@ import re
 import traceback
 from typing import Callable, Dict, List, Union, Optional
 
-from app.application.site.sites import SitesHelper  # pylint: disable=no-name-in-module
+from app.application.site.sites import SitesHelper  # pylint: disable=import-error,no-name-in-module
 
 from app.application.orchestration import ChainBase
 from app.application.orchestration.media import MediaChain
