@@ -1,5 +1,7 @@
+import asyncio
 import time
 from typing import Any, Optional, Union
+from weakref import WeakValueDictionary
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -16,8 +18,23 @@ class AgentChatOper(DbOper):
     Agent 会话历史数据管理。
     """
 
+    # 每次调用都会创建新的 AgentChatOper 实例，锁必须挂在类级才能跨实例生效。
+    # 异步写方法（追加/保存展示消息、保存原始消息、写标题）都是先读后写的复合操作，
+    # 同一会话并发写入会发生丢更新；按 session_id 弱引用持有锁，不限制不同会话间的并发，
+    # 且不为已结束的会话永久占用内存。
+    _session_write_locks: "WeakValueDictionary[str, asyncio.Lock]" = WeakValueDictionary()
+
     def __init__(self, db: Optional[Union[Session, AsyncSession]] = None):
         super().__init__(db)
+
+    @classmethod
+    def _session_write_lock(cls, session_id: str) -> asyncio.Lock:
+        """返回当前进程内指定会话的异步写锁。"""
+        lock = cls._session_write_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            cls._session_write_locks[session_id] = lock
+        return lock
 
     @staticmethod
     def _now() -> str:
@@ -217,22 +234,23 @@ class AgentChatOper(DbOper):
         messages: list[dict],
     ) -> None:
         """
-        异步保存可恢复 Agent 上下文的原始消息。
+        异步保存可恢复 Agent 上下文的原始消息，按会话串行化避免并发丢更新。
         """
-        chat = await self.async_get(session_id=session_id, user_id=user_id)
-        if not chat:
-            chat = await self.async_get(session_id=session_id)
-        if not chat:
-            chat = await self.async_ensure_session(session_id=session_id, user_id=user_id)
-        if not chat:
-            return
-        await self._stage_async_update(
-            chat,
-            {
-                "agent_messages": messages or [],
-                "updated_at": self._now(),
-            },
-        )
+        async with self._session_write_lock(session_id):
+            chat = await self.async_get(session_id=session_id, user_id=user_id)
+            if not chat:
+                chat = await self.async_get(session_id=session_id)
+            if not chat:
+                chat = await self.async_ensure_session(session_id=session_id, user_id=user_id)
+            if not chat:
+                return
+            await self._stage_async_update(
+                chat,
+                {
+                    "agent_messages": messages or [],
+                    "updated_at": self._now(),
+                },
+            )
 
     def update_title_if_empty(
         self,
@@ -285,32 +303,33 @@ class AgentChatOper(DbOper):
         client_session_id: Optional[str] = None,
     ) -> None:
         """
-        异步在会话尚未生成标题时写入标题。
+        异步在会话尚未生成标题时写入标题，按会话串行化避免并发丢更新。
         """
         normalized_title = self._normalize_title(title, [])
         if normalized_title == DEFAULT_AGENT_CHAT_TITLE:
             return
 
-        chat = await self.async_ensure_session(
-            session_id=session_id,
-            user_id=user_id,
-            username=username,
-            channel=channel,
-            source=source,
-            original_chat_id=original_chat_id,
-            client_session_id=client_session_id,
-        )
-        if not chat:
-            return
-        if self.has_custom_title(chat.title):
-            return
-        await self._stage_async_update(
-            chat,
-            {
-                "title": normalized_title,
-                "updated_at": self._now(),
-            },
-        )
+        async with self._session_write_lock(session_id):
+            chat = await self.async_ensure_session(
+                session_id=session_id,
+                user_id=user_id,
+                username=username,
+                channel=channel,
+                source=source,
+                original_chat_id=original_chat_id,
+                client_session_id=client_session_id,
+            )
+            if not chat:
+                return
+            if self.has_custom_title(chat.title):
+                return
+            await self._stage_async_update(
+                chat,
+                {
+                    "title": normalized_title,
+                    "updated_at": self._now(),
+                },
+            )
 
     def save_display_messages(
         self,
@@ -369,7 +388,35 @@ class AgentChatOper(DbOper):
         title: Optional[str] = None,
     ) -> Optional[AgentChat]:
         """
-        异步保存用户可见的 Agent 会话消息。
+        异步保存用户可见的 Agent 会话消息，按会话串行化避免并发丢更新。
+        """
+        async with self._session_write_lock(session_id):
+            return await self._async_save_display_messages_locked(
+                session_id=session_id,
+                user_id=user_id,
+                messages=messages,
+                username=username,
+                channel=channel,
+                source=source,
+                original_chat_id=original_chat_id,
+                client_session_id=client_session_id,
+                title=title,
+            )
+
+    async def _async_save_display_messages_locked(
+        self,
+        session_id: str,
+        user_id: Optional[str] = None,
+        messages: Optional[list[dict]] = None,
+        username: Optional[str] = None,
+        channel: Optional[ChannelRef] = None,
+        source: Optional[str] = None,
+        original_chat_id: Optional[str] = None,
+        client_session_id: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Optional[AgentChat]:
+        """
+        保存用户可见的 Agent 会话消息，调用方必须已持有该会话的写锁。
         """
         normalized_messages = self._normalize_messages(messages)
         chat = await self.async_ensure_session(
@@ -456,32 +503,35 @@ class AgentChatOper(DbOper):
     ) -> Optional[AgentChat]:
         """
         异步追加一组用户可见的 Agent 会话消息。
+
+        读取既有快照后整列写回，按会话持锁串行执行，避免并发追加互相覆盖。
         """
-        chat = await self.async_ensure_session(
-            session_id=session_id,
-            user_id=user_id,
-            username=username,
-            channel=channel,
-            source=source,
-            original_chat_id=original_chat_id,
-            client_session_id=client_session_id,
-        )
-        if not chat:
-            return None
-        display_messages = self._normalize_messages(chat.display_messages)
-        display_messages.extend(self._normalize_messages(messages))
-        title = chat.title if self.has_custom_title(chat.title) else None
-        return await self.async_save_display_messages(
-            session_id=session_id,
-            user_id=user_id,
-            messages=display_messages,
-            username=username or chat.username,
-            channel=channel or chat.channel,
-            source=source or chat.source,
-            original_chat_id=original_chat_id or chat.original_chat_id,
-            client_session_id=client_session_id or chat.client_session_id,
-            title=title,
-        )
+        async with self._session_write_lock(session_id):
+            chat = await self.async_ensure_session(
+                session_id=session_id,
+                user_id=user_id,
+                username=username,
+                channel=channel,
+                source=source,
+                original_chat_id=original_chat_id,
+                client_session_id=client_session_id,
+            )
+            if not chat:
+                return None
+            display_messages = self._normalize_messages(chat.display_messages)
+            display_messages.extend(self._normalize_messages(messages))
+            title = chat.title if self.has_custom_title(chat.title) else None
+            return await self._async_save_display_messages_locked(
+                session_id=session_id,
+                user_id=user_id,
+                messages=display_messages,
+                username=username or chat.username,
+                channel=channel or chat.channel,
+                source=source or chat.source,
+                original_chat_id=original_chat_id or chat.original_chat_id,
+                client_session_id=client_session_id or chat.client_session_id,
+                title=title,
+            )
 
     async def async_list_by_page(
         self,

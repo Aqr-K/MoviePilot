@@ -278,3 +278,37 @@ def test_memory_manager_restores_agent_messages_from_database():
     assert len(messages) == 1
     assert isinstance(messages[0], HumanMessage)
     assert messages[0].content == "继续之前的话题"
+
+
+def test_async_append_display_messages_serializes_concurrent_writers():
+    """同一会话并发追加展示消息不得因读写交错而丢更新。"""
+    session_id = "session-concurrent-append"
+    user_id = "9"
+
+    async def scenario():
+        await asyncio.gather(
+            AgentChatOper().async_append_display_messages(
+                session_id=session_id,
+                user_id=user_id,
+                username="admin",
+                channel="Telegram",
+                source="telegram-main",
+                messages=[{"role": "user", "content": "first"}],
+            ),
+            AgentChatOper().async_append_display_messages(
+                session_id=session_id,
+                user_id=user_id,
+                username="admin",
+                channel="Telegram",
+                source="telegram-main",
+                messages=[{"role": "user", "content": "second"}],
+            ),
+        )
+        return await AgentChatOper().async_get(session_id=session_id, user_id=user_id)
+
+    chat = asyncio.run(scenario())
+
+    assert chat is not None
+    assert chat.message_count == 2
+    contents = {message["content"] for message in chat.display_messages}
+    assert contents == {"first", "second"}
