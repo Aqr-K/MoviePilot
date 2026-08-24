@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app.runtime.config import global_vars
+from app.runtime.correlation import call_with_correlation, get_correlation_id
 from app.runtime.events import eventmanager
 from app.runtime.log import logger
 from app.runtime.progress import AsyncProgressHelper, ProgressHelper
@@ -453,7 +454,10 @@ class SchedulerEngine:
                 deferred_finish = __start_coro(func(*args, **kwargs))
             elif run_in_process:
                 # 多进程运行
-                p = multiprocessing.Process(target=func, args=args, kwargs=kwargs)
+                p = multiprocessing.Process(
+                    target=call_with_correlation,
+                    args=(get_correlation_id(), func, args, kwargs),
+                )
                 p.start()
                 p.join()
             else:
