@@ -4,7 +4,32 @@ import asyncio
 
 import pytest
 
-from scripts.architecture.async_blocking import compare_async_blocking
+from scripts.architecture.async_blocking import SCAN_ROOTS, compare_async_blocking
+
+
+def test_async_blocking_scan_covers_runtime_entrypoints() -> None:
+    """扫描范围必须覆盖全部 canonical 宿主目录和顶层运行入口。"""
+    assert {
+        "app/adapters",
+        "app/api",
+        "app/agent",
+        "app/application",
+        "app/db",
+        "app/doctor",
+        "app/domain",
+        "app/foundation",
+        "app/monitor",
+        "app/modules",
+        "app/runtime",
+        "app/scheduler",
+        "app/schemas",
+        "app/startup",
+        "app/workflow",
+        "app/cli.py",
+        "app/command.py",
+        "app/factory.py",
+        "app/main.py",
+    }.issubset({str(path) for path in SCAN_ROOTS})
 
 
 def test_async_blocking_ratchet_allows_removal_and_rejects_growth() -> None:

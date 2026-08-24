@@ -61,7 +61,7 @@ from app.application.plugin.runtime import get_plugin_manager as PluginManager
 from app.runtime.log import logger
 from app.schemas.event import PluginDataResetEventData
 from app.schemas.types import ChainEventType, EventType
-from app.application.scheduling import Scheduler
+from app.application.scheduling import Scheduler, start_scheduler_job
 from app.application.site.sites import SitesHelper  # pylint: disable=import-error,no-name-in-module
 from app.domain import site as site_rules
 from app.foundation import url as url_tools
@@ -146,7 +146,7 @@ def get_search_subscriptions_command(
     def schedule_search(subscribe_id: int | None, state: str | None) -> None:
         """按历史参数提交订阅搜索调度任务。"""
         background_tasks.add_task(
-            Scheduler().start,
+            start_scheduler_job,
             job_id="subscribe_search",
             sid=subscribe_id,
             state=state,

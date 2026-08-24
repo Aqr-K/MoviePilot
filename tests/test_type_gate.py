@@ -22,7 +22,10 @@ def test_mypy_gate_has_explicit_strict_scope_without_global_ignore() -> None:
 
     assert settings.getboolean("strict") is True
     assert "app/runtime/event/contracts.py" in governed_files
+    assert "app/runtime/event/errors.py" in governed_files
     assert "app/runtime/extensions/contract/module_method.py" in governed_files
+    assert "app/application/scheduling.py" in governed_files
+    assert "scripts/architecture/async_blocking.py" in governed_files
     assert "app/api/host_runtime.py" in governed_files
     assert "app/api/context.py" in governed_files
     assert any(path.startswith("app/domain/") for path in governed_files)
