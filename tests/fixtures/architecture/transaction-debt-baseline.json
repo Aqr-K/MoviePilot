@@ -1,12 +1,12 @@
 {
   "model_decorators": {
     "by_kind": {
-      "async_db_query": 10,
+      "async_db_query": 7,
       "async_db_update": 5,
-      "db_query": 19,
+      "db_query": 17,
       "db_update": 12
     },
-    "count": 46,
+    "count": 41,
     "methods": [
       {
         "decorator": "db_query",
@@ -157,31 +157,6 @@
         "decorator": "db_query",
         "file": "app/db/models/sitestatistic.py",
         "method": "SiteStatistic.get_by_domain"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/subscribehistory.py",
-        "method": "SubscribeHistory.async_exists"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/subscribehistory.py",
-        "method": "SubscribeHistory.async_list_by_type"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/subscribehistory.py",
-        "method": "SubscribeHistory.async_list_by_type_and_username"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/subscribehistory.py",
-        "method": "SubscribeHistory.exists"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/subscribehistory.py",
-        "method": "SubscribeHistory.list_by_type"
       },
       {
         "decorator": "async_db_update",
