@@ -1,3 +1,4 @@
+import asyncio
 import inspect
 import sys
 from typing import Callable
@@ -364,11 +365,15 @@ async def stop_modules():
     服务关闭
     """
     async def run_step(name: str, callback: Callable[[], object]) -> None:
-        """单个模块资源关闭失败时继续执行后续阶段"""
+        """单个模块资源关闭失败或被取消时继续执行后续阶段"""
         try:
             result = callback()
             if inspect.isawaitable(result):
                 await result
+        except asyncio.CancelledError:
+            # 外层关闭超时会取消当前正在执行的步骤；吞掉取消而不是让它继续向上
+            # 传播，否则本步骤之后的全部资源收口都会被跳过。
+            logger.warning(f"关闭{name}时收到取消请求，继续执行后续资源收口")
         except Exception as err:
             logger.error(f"关闭{name}失败：{err}")
 

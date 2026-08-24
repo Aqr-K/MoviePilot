@@ -596,6 +596,19 @@ def test_stop_modules_continues_after_internal_owner_failures(monkeypatch):
         _assert_completed_once(dependency)
 
 
+def test_stop_modules_continues_after_step_cancellation(monkeypatch):
+    """单个关闭步骤被取消（如外层超时）不得跳过后续全部资源收口。"""
+    stop_agent = AsyncMock(side_effect=asyncio.CancelledError())
+    monkeypatch.setattr(modules_initializer, "stop_agent", stop_agent)
+    dependencies = _patch_module_shutdown_dependencies(monkeypatch)
+
+    asyncio.run(modules_initializer.stop_modules())
+
+    stop_agent.assert_awaited_once_with()
+    for dependency in dependencies.values():
+        _assert_completed_once(dependency)
+
+
 def test_stop_modules_drains_web_agent_background_tasks_before_database(monkeypatch):
     """关闭时必须先收口 Web Agent 后台任务，再关闭数据库连接。"""
     order = []
