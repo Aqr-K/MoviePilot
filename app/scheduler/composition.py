@@ -86,6 +86,7 @@ class Scheduler(
 
         # 停止定时服务
         self.stop()
+        self._accepting_async_tasks = True
 
         # 调试模式不启动定时服务
         if settings.DEV:

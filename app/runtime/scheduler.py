@@ -10,9 +10,11 @@ import multiprocessing
 import threading
 import time
 import traceback
+from concurrent.futures import CancelledError as ConcurrentCancelledError
+from concurrent.futures import Future as ConcurrentFuture
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from app.runtime.config import global_vars
 from app.runtime.correlation import call_with_correlation, get_correlation_id
@@ -88,6 +90,9 @@ class SchedulerEngine:
         self._lock = threading.RLock()
         # 各服务的运行状态
         self._jobs = {}
+        # 引擎自行提交到事件循环的协程任务，用于关停时收口
+        self._async_tasks: set = set()
+        self._accepting_async_tasks = True
 
     @staticmethod
     def _get_progress_key(job_id: str) -> str:
@@ -138,6 +143,8 @@ class SchedulerEngine:
         """
         准备定时任务
         """
+        if not getattr(self, "_accepting_async_tasks", True):
+            return None
         started_at = self._format_time()
         with self._lock:
             job = self._jobs.get(job_id)
@@ -433,12 +440,18 @@ class SchedulerEngine:
                 running_loop = None
             target_loop = global_vars.loop
             if running_loop:
-                asyncio.create_task(self.__run_coro_job(coro=coro, job_id=job_id, job=job))
-                return True
+                return self._create_async_task(
+                    self.__run_coro_job(coro=coro, job_id=job_id, job=job)
+                )
             if target_loop and target_loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self.__run_coro_job(coro=coro, job_id=job_id, job=job),
-                    target_loop,
+                if not getattr(self, "_accepting_async_tasks", True):
+                    coro.close()
+                    return False
+                self._track_async_task(
+                    asyncio.run_coroutine_threadsafe(
+                        self.__run_coro_job(coro=coro, job_id=job_id, job=job),
+                        target_loop,
+                    )
                 )
                 return True
             asyncio.run(coro)
@@ -491,8 +504,76 @@ class SchedulerEngine:
                     job_id=job_id, success=success, error=error
                 ))
 
-    @staticmethod
-    def _submit_to_loop(coro: Any) -> None:
+    def _track_async_task(
+        self, task: Union[asyncio.Task, ConcurrentFuture]
+    ) -> Union[asyncio.Task, ConcurrentFuture]:
+        """登记引擎自行提交的协程任务，完成后自动移除并消费异常。"""
+        tasks = getattr(self, "_async_tasks", None)
+        if tasks is None:
+            tasks = set()
+            self._async_tasks = tasks
+
+        def _discard(done: Union[asyncio.Task, ConcurrentFuture]) -> None:
+            """释放已完成任务，并避免跨线程 Future 产生未取回异常。"""
+            with self._lock:
+                tasks.discard(done)
+            try:
+                done.exception()
+            except (asyncio.CancelledError, ConcurrentCancelledError):
+                pass
+
+        with self._lock:
+            tasks.add(task)
+            task.add_done_callback(_discard)
+        return task
+
+    def _create_async_task(self, coro: Any) -> bool:
+        """在当前事件循环创建并登记任务，返回是否已异步接管。"""
+        if not getattr(self, "_accepting_async_tasks", True):
+            coro.close()
+            return False
+        self._track_async_task(asyncio.create_task(coro))
+        return True
+
+    def _cancel_async_tasks(self) -> Tuple[Union[asyncio.Task, ConcurrentFuture], ...]:
+        """停止接收新协程并请求取消现有引擎任务。"""
+        with self._lock:
+            self._accepting_async_tasks = False
+            tasks = tuple(getattr(self, "_async_tasks", ()))
+        for task in tasks:
+            if isinstance(task, asyncio.Task):
+                loop = task.get_loop()
+                if loop.is_running():
+                    loop.call_soon_threadsafe(task.cancel)
+                else:
+                    task.cancel()
+            else:
+                task.cancel()
+        return tasks
+
+    async def async_stop(self, *, timeout_seconds: float = 30.0) -> None:
+        """异步关闭引擎，并在有限预算内等待自有协程任务收口。"""
+        self.stop()
+        tasks = tuple(getattr(self, "_async_tasks", ()))
+        if not tasks:
+            return
+        awaitables = []
+        for task in tasks:
+            if isinstance(task, asyncio.Future):
+                awaitables.append(task)
+            else:
+                awaitables.append(asyncio.wrap_future(task))
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*awaitables, return_exceptions=True),
+                timeout=timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.error("等待定时器协程任务收口超时")
+            for task in tasks:
+                task.cancel()
+
+    def _submit_to_loop(self, coro: Any) -> None:
         """
         把协程提交到事件循环执行，兼容以下调用环境：
         - 已在事件循环内（async 任务内部）：排队为独立任务，避免阻塞
@@ -504,9 +585,14 @@ class SchedulerEngine:
         except RuntimeError:
             running_loop = None
         if running_loop:
-            asyncio.create_task(coro)
+            self._create_async_task(coro)
         elif global_vars.loop and global_vars.loop.is_running():
-            asyncio.run_coroutine_threadsafe(coro, global_vars.loop)
+            if not getattr(self, "_accepting_async_tasks", True):
+                coro.close()
+                return
+            self._track_async_task(
+                asyncio.run_coroutine_threadsafe(coro, global_vars.loop)
+            )
         else:
             asyncio.run(coro)
 
@@ -601,6 +687,7 @@ class SchedulerEngine:
         """
         关闭定时服务
         """
+        self._cancel_async_tasks()
         with lock:
             try:
                 if self._scheduler:

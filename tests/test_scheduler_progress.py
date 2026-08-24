@@ -14,7 +14,11 @@ from app.scheduler import composition as composition_module
 def _build_scheduler(job_id, func):
     """构造不启动 APScheduler 的定时服务测试对象。"""
     scheduler = object.__new__(Scheduler)
+    scheduler._scheduler = None
+    scheduler._event = threading.Event()
     scheduler._lock = threading.RLock()
+    scheduler._async_tasks = set()
+    scheduler._accepting_async_tasks = True
     scheduler._jobs = {
         job_id: {
             "name": "测试定时服务",
@@ -198,6 +202,36 @@ def test_scheduler_cancels_coroutine_job_after_declared_timeout():
     assert progress.status == "failed"
     assert progress.success is False
     assert "超时" in progress.error
+
+
+def test_scheduler_async_stop_cancels_owned_async_jobs():
+    """引擎关停应取消并等待自身登记的异步作业。"""
+    job_id = f"test-owned-task-{uuid4()}"
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def task():
+        """等待关停信号，验证任务确实由引擎持有。"""
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    scheduler = _build_scheduler(job_id, task)
+
+    async def run_task():
+        """在当前事件循环启动并收口异步作业。"""
+        scheduler.start(job_id)
+        await started.wait()
+        assert len(scheduler._async_tasks) == 1
+        await scheduler.async_stop(timeout_seconds=1)
+
+    asyncio.run(run_task())
+
+    assert cancelled.is_set()
+    assert scheduler._async_tasks == set()
 
 
 def test_scheduler_returns_none_for_unknown_job():
