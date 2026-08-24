@@ -355,6 +355,67 @@ location /api { proxy_pass http://backend_api; }
 
 ---
 
+## 六bis、落地状态（2026-08-24）
+
+Track A 与 Track B 第一期已实现，提交 `ac0a31565`、`2dbb7fc04`、`e0f680358`。
+
+### Track A
+
+| 项 | 状态 | 落点 |
+|---|---|---|
+| A0 事件循环延迟探针 | 已落地 | `app/runtime/diagnostics/loop_probe.py` |
+| A1 anyio 线程槽对齐 | 已落地 | `app/runtime/thread.py`，`API_THREAD_LIMIT`，`LifecycleComponent("并发线程槽", start_order=1)` |
+| A2 事件循环阻塞 | 已落地 | image / site / servarr / system / message 五处 + 插件同步方法卸载 |
+| A3 阻塞归因与点名 | 已落地 | `app/runtime/diagnostics/blocking.py` + `app/doctor/checks.py` 检查项 |
+| A4 插件执行配额 | 已落地 | `app/runtime/extensions/plugin_quota.py`，覆盖插件方法调用与广播扇出两条入口 |
+| A5 作业看门狗与熔断 | 已落地 | `app/scheduler/{watchdog,breaker,supervision}.py` |
+| A6 PyO3 `allow_threads` 下沉 | **未做** | 属 `moviepilot-rust` 独立仓，不在本仓库范围 |
+
+关键设计决定：
+
+- **不 patch stdlib 阻塞函数**。插件可引入任意 C 扩展，patch 覆盖面无法穷尽，
+  HA 自身也承认「能抓 `open`，抓不到之后的 read/write」。改用独立 OS 线程按
+  `sys._current_frames()` 采样事件循环线程活帧，能看到真正的阻塞现场且零干扰。
+- **doctor 检查项区分两种病因**：栈中有插件帧则点名插件，否则指向线程池繁忙线程
+  经 GIL 争抢饿死事件循环。这是 Track A0「先确诊，别赌」的落点。
+- **配额与熔断的收敛方向刻意相反**：配额按**插件类**发放（防止插件增开实例线性
+  放大份额），熔断按**作业**跳闸（防止一条定时任务拖死整个插件的 API、页面与事件处理）。
+- **广播扇出用独立的短等待超时**（1 秒，协程路径为 60 秒）。取槽阻塞的是唯一的
+  广播消费者线程，等待期间全部排队事件停止分发；宁可让占满配额的插件短暂突破上限，
+  也不能让它拖停整条事件总线。
+- **看门狗只观测不终止**。Python 没有安全的线程终止手段，强杀会留下不一致状态。
+- **作业观测挂在作业函数外层而非 APScheduler 作业事件**：`SchedulerEngine.start`
+  吞掉作业异常故 `EVENT_JOB_ERROR` 永不触发；协程作业提交后 `start` 立即返回故
+  `EVENT_JOB_EXECUTED` 会在作业仍在运行时就发出。作业事件仅用于 `EVENT_JOB_MISSED`。
+
+### Track B 第一期
+
+`app/runtime/extensions/remote/`（protocol / host_api / proxy / plugin_worker），
+**独立模块，未接入插件系统**，默认不启用。
+
+PoC 已证明核心命题：一个**既不 sleep 也不做 IO 的死循环插件**——在宿主进程内
+无法中断——跨进程后被超时 SIGKILL 隔离，宿主完好、惰性重启并重放 `init_plugin`。
+**这是进程边界能做而 Track A 的配额做不到的事**：配额只能限制并发数，无法中断
+一个已经跑起来的死循环。两轨互补，不是重复。
+
+### 遗留项
+
+| 项 | 说明 |
+|---|---|
+| A6 PyO3 `allow_threads` | 需在 `moviepilot-rust` 独立仓推进 |
+| `async_dispatch_chain` 的配额 | `invoke_async` 把插件同步绑定卸载到 anyio 池（非共享池），未加闸门。该路径 handler 串行 `await`、无无界扇出，风险低 |
+| `misfire_grace_time=1` | 确认过紧（调度延迟 1 秒即整次跳过），建议 60 秒。本轮只加观测（`EVENT_JOB_MISSED` 计数），待真实数据再调 |
+| `app/monitor/monitor.py:176` 第二个 BackgroundScheduler | 该纳管但不能接 `JobSupervision`（裸 APScheduler，且自带名为 `watchdog` 的作业语义打架）。应显式配置其 executor/jobstore/job_defaults 并复用 `JobWatchdog` |
+| Track B 接入 `plugin_manager` 的三个障碍 | ①宿主回调白名单落地会撞分层门禁——`app/runtime/` 不能反向依赖 `app/db/`，装配点归属需先裁决；②白名单最小子集撑不住真实插件，`get_plugin_database()` 交出活的 SQLAlchemy 会话句柄**根本过不了进程边界**；③十二族里只有纯数据族能原样过界，逐族判定可序列化边界的工作量大于 RPC 骨架本身 |
+
+### 已知 pre-existing 测试失败（非本次引入，均由开工前的提交带入）
+
+- `test_official_plugin_baseline_records_external_source`——fixture `schema_version` 2≠3
+- `test_no_unmapped_class_level_annotations_in_db_package`——`app/db/oper/subscribe.py`
+  的 `SubscribeStageResult` 用了裸类级注解，由 `35e616242` 引入
+
+---
+
 ## 七、风险与回退
 
 | 风险 | 缓解 |
