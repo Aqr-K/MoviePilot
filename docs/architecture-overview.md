@@ -691,5 +691,6 @@ flowchart LR
 | [`docs/mcp-api.md`](mcp-api.md) | MCP 工具端点说明 |
 | [`docs/plugin-extension-architecture.md`](plugin-extension-architecture.md) | 插件扩展注册的设计决定：身份/能力/激活三面分立、十二族 `provides_*`、分发原语的进程内外双形态 |
 | [`docs/runtime-call-graph.md`](runtime-call-graph.md) | 运行时调用关系图谱 |
+| [`docs/process-isolation-design.md`](process-isolation-design.md) | 进程隔离与并发模型：数据面/控制面切分现状、多进程结构性阻碍、三轨推进方案 |
 | [`docs/refactor/backend-architecture-governance.md`](refactor/backend-architecture-governance.md) | 分阶段架构治理、边界门禁与迁移验收 |
 | [`docs/refactor/backend-module-refactor-compatibility.md`](refactor/backend-module-refactor-compatibility.md) | 模块迁移与插件兼容层实施矩阵 |
