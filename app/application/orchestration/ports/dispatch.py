@@ -33,6 +33,12 @@ class CapabilityDispatch(Protocol):
     async def async_multicast(self, method: str, *args: Any, **kwargs: Any) -> List[Any]:
         """异步在实现该方法的能力族内收集全部非空答案。"""
 
+    def plugin_multicast(self, method: str, *args: Any, **kwargs: Any) -> List[Any]:
+        """仅在插件提供者范围内收集全部非空答案，不涉及宿主模块。"""
+
+    async def async_plugin_multicast(self, method: str, *args: Any, **kwargs: Any) -> List[Any]:
+        """异步在插件提供者范围内收集全部非空答案，不涉及宿主模块。"""
+
     def unicast(self, method: str, *args: Any, **kwargs: Any) -> Any:
         """在实现该方法的能力族内仲裁单一答案。"""
 
@@ -193,6 +199,24 @@ class ModuleCapabilityDispatch:
         :return: 按插件优先、模块优先级排序的非空结果列表
         """
         return await self._dispatcher.async_multicast(method, *args, **kwargs)
+
+    def plugin_multicast(self, method: str, *args: Any, **kwargs: Any) -> List[Any]:
+        """
+        仅在插件提供者范围内收集全部非空答案，不涉及宿主模块
+
+        :param method: 模块方法名称
+        :return: 按插件优先级排序的非空结果列表
+        """
+        return self._dispatcher.plugin_multicast(method, *args, **kwargs)
+
+    async def async_plugin_multicast(self, method: str, *args: Any, **kwargs: Any) -> List[Any]:
+        """
+        异步在插件提供者范围内收集全部非空答案，不涉及宿主模块
+
+        :param method: 模块方法名称
+        :return: 按插件优先级排序的非空结果列表
+        """
+        return await self._dispatcher.async_plugin_multicast(method, *args, **kwargs)
 
     def unicast(self, method: str, *args: Any, **kwargs: Any) -> Any:
         """

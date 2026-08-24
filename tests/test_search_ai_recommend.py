@@ -55,6 +55,12 @@ class SearchChainAIRecommendTest(unittest.IsolatedAsyncioTestCase):
         chain.save_cache = lambda _cache, _filename: None
         chain.remove_cache = lambda _filename: None
         chain.get_search_page_size = IndexerModule.get_search_page_size
+        chain.search_plugin_torrents = lambda **_kwargs: []
+
+        async def no_plugin_results(**_kwargs):
+            return []
+
+        chain.async_search_plugin_torrents = no_plugin_results
         return chain
 
     async def test_start_recommend_task_restores_original_indices(self):

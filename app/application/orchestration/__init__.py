@@ -230,6 +230,34 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         """
         return await self._module_dispatcher.async_multicast(method, *args, **kwargs)
 
+    def plugin_multicast(
+            self,
+            method: str,
+            *args,
+            **kwargs,
+    ) -> List[Any]:
+        """
+        仅在插件提供者范围内收集全部非空答案，不涉及宿主模块
+
+        :param method: 模块方法名称
+        :return: 按插件优先级排序的非空结果列表
+        """
+        return self._module_dispatcher.plugin_multicast(method, *args, **kwargs)
+
+    async def async_plugin_multicast(
+            self,
+            method: str,
+            *args,
+            **kwargs,
+    ) -> List[Any]:
+        """
+        异步在插件提供者范围内收集全部非空答案，不涉及宿主模块
+
+        :param method: 模块方法名称
+        :return: 按插件优先级排序的非空结果列表
+        """
+        return await self._module_dispatcher.async_plugin_multicast(method, *args, **kwargs)
+
     def unicast(
             self,
             method: str,
@@ -668,6 +696,23 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
             site=site, keyword=keyword, mtype=mtype, page=page
         )
 
+    def search_plugin_torrents(
+            self,
+            keyword: str,
+            mtype: Optional[MediaType] = None,
+            page: Optional[int] = 0,
+    ) -> List[TorrentInfo]:
+        """
+        仅搜索插件提供的资源源，不依赖任何站点索引器配置
+        :param keyword:  搜索关键词
+        :param mtype:  媒体类型
+        :param page:  页码
+        :reutrn: 资源列表
+        """
+        return SearchPorts(self).search_plugin_torrents(
+            keyword=keyword, mtype=mtype, page=page
+        )
+
     def search_subtitles(
             self,
             site: dict,
@@ -702,6 +747,23 @@ class ChainBase(RecognitionMixin, MessageProcessingMixin, NotificationMixin,
         """
         return await SearchPorts(self).async_search_torrents(
             site=site, keyword=keyword, mtype=mtype, page=page
+        )
+
+    async def async_search_plugin_torrents(
+            self,
+            keyword: str,
+            mtype: Optional[MediaType] = None,
+            page: Optional[int] = 0,
+    ) -> List[TorrentInfo]:
+        """
+        异步搜索插件提供的资源源，不依赖任何站点索引器配置
+        :param keyword:  搜索关键词
+        :param mtype:  媒体类型
+        :param page:  页码
+        :reutrn: 资源列表
+        """
+        return await SearchPorts(self).async_search_plugin_torrents(
+            keyword=keyword, mtype=mtype, page=page
         )
 
     async def async_search_subtitles(

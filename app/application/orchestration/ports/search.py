@@ -148,6 +148,48 @@ class SearchPorts(CapabilityPorts):
             "search_torrents", site=site, keyword=keyword, mtype=mtype, page=page
         )
 
+    def search_plugin_torrents(
+            self,
+            keyword: str,
+            mtype: Optional[MediaType] = None,
+            page: Optional[int] = 0,
+    ) -> List[TorrentInfo]:
+        """
+        仅搜索插件提供的资源源，不依赖任何站点索引器配置
+        :param keyword:  搜索关键词
+        :param mtype:  媒体类型
+        :param page:  页码
+        :reutrn: 资源列表
+        """
+        return [
+            torrent
+            for torrents in self._dispatch.plugin_multicast(
+                "search_torrents", site={}, keyword=keyword, mtype=mtype, page=page
+            )
+            for torrent in torrents
+        ]
+
+    async def async_search_plugin_torrents(
+            self,
+            keyword: str,
+            mtype: Optional[MediaType] = None,
+            page: Optional[int] = 0,
+    ) -> List[TorrentInfo]:
+        """
+        异步搜索插件提供的资源源，不依赖任何站点索引器配置
+        :param keyword:  搜索关键词
+        :param mtype:  媒体类型
+        :param page:  页码
+        :reutrn: 资源列表
+        """
+        return [
+            torrent
+            for torrents in await self._dispatch.async_plugin_multicast(
+                "async_search_torrents", site={}, keyword=keyword, mtype=mtype, page=page
+            )
+            for torrent in torrents
+        ]
+
     def search_subtitles(
             self,
             site: dict,

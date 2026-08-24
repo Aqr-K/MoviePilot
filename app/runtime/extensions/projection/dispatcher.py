@@ -196,6 +196,38 @@ class ModuleInvocationDispatcher:
                 results.append(result)
         return results
 
+    def plugin_multicast(self, method: str, *args: Any, **kwargs: Any) -> list:
+        """仅在插件提供者范围内收集全部非空答案，不涉及宿主模块。
+
+        用于插件独立提供资源、不依赖任何宿主站点/模块配置即可产出结果的场景。
+
+        :param method: 模块方法名称
+        :param args: 透传给提供者的位置参数
+        :param kwargs: 透传给提供者的命名参数
+        :return: 按插件优先级排序的非空结果列表
+        """
+        results: list[Any] = []
+        for provider in self._plugin_answer_providers(method):
+            result = self._invoke(provider, method, *args, **kwargs)
+            if not self.is_valid_empty(result):
+                results.append(result)
+        return results
+
+    async def async_plugin_multicast(self, method: str, *args: Any, **kwargs: Any) -> list:
+        """以多播语义收集插件提供者的全部非空答案，不涉及宿主模块。
+
+        :param method: 模块方法名称
+        :param args: 透传给提供者的位置参数
+        :param kwargs: 透传给提供者的命名参数
+        :return: 按插件优先级排序的非空结果列表
+        """
+        results: list[Any] = []
+        for provider in self._plugin_answer_providers(method):
+            result = await self._async_invoke(provider, method, *args, **kwargs)
+            if not self.is_valid_empty(result):
+                results.append(result)
+        return results
+
     def unicast(self, method: str, *args: Any, **kwargs: Any) -> Any:
         """在能力族内仲裁出单一答案，首个非空结果即为最终答案。
 
@@ -295,6 +327,16 @@ class ModuleInvocationDispatcher:
         """
         for source in self._sources:
             yield from source.answer_providers(method)
+
+    def _plugin_answer_providers(self, method: str) -> Iterator[ExtensionProvider]:
+        """仅遍历插件目录参与仲裁的提供者，跳过宿主模块目录。
+
+        :param method: 模块方法名称
+        :return: 提供者迭代器
+        """
+        for source in self._sources:
+            if isinstance(source, PluginProviderSource):
+                yield from source.answer_providers(method)
 
     def _invoke(
         self,
