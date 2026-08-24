@@ -225,59 +225,7 @@
         "name": "SystemConfigOper"
       },
       {
-        "file": "app/startup/dataports_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
         "file": "app/startup/modules_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/modules_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/modules_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/modules_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/modules_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/modules_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/plugins_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/plugins_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/plugins_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/plugins_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/plugins_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/plugins_initializer.py",
-        "name": "SystemConfigOper"
-      },
-      {
-        "file": "app/startup/plugins_initializer.py",
         "name": "SystemConfigOper"
       },
       {
@@ -285,6 +233,6 @@
         "name": "SystemConfigOper"
       }
     ],
-    "count": 23
+    "count": 10
   }
 }

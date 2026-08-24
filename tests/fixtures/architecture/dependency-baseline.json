@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7055,
-  "edge_sha256": "791a1f306827d8af364c45ec39c8c0f1331f0862771982c3cee1fa83d4a041a2",
+  "edge_count": 7056,
+  "edge_sha256": "3c86ad9a96551ecf253e6bb22f79e55a4c668cef521818bf1bac5fa72ad7e667",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -6815,6 +6815,7 @@
     "app.startup.modules_initializer -> app.api.data",
     "app.startup.modules_initializer -> app.api.host_runtime",
     "app.startup.modules_initializer -> app.application",
+    "app.startup.modules_initializer -> app.application.configuration",
     "app.startup.modules_initializer -> app.application.database",
     "app.startup.modules_initializer -> app.application.image",
     "app.startup.modules_initializer -> app.application.messaging",
@@ -6892,6 +6893,7 @@
     "app.startup.plugins_initializer -> app.adapters.system.plugin.manifest",
     "app.startup.plugins_initializer -> app.adapters.system.plugin.package",
     "app.startup.plugins_initializer -> app.application",
+    "app.startup.plugins_initializer -> app.application.configuration",
     "app.startup.plugins_initializer -> app.application.messaging",
     "app.startup.plugins_initializer -> app.application.messaging.message",
     "app.startup.plugins_initializer -> app.application.plugin",
@@ -6903,7 +6905,6 @@
     "app.startup.plugins_initializer -> app.db.oper",
     "app.startup.plugins_initializer -> app.db.oper.pluginconfig",
     "app.startup.plugins_initializer -> app.db.oper.plugindata",
-    "app.startup.plugins_initializer -> app.db.oper.systemconfig",
     "app.startup.plugins_initializer -> app.db.session",
     "app.startup.plugins_initializer -> app.db.uow",
     "app.startup.plugins_initializer -> app.foundation",
