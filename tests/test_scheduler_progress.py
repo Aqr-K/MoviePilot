@@ -153,6 +153,82 @@ def test_scheduler_runs_async_job_from_current_event_loop(monkeypatch):
     assert progress.status == "success"
 
 
+def test_scheduler_stop_without_cancel_preserves_running_async_job():
+    """配置热重载路径的 stop(cancel_async_tasks=False) 不得打断仍在执行的协程作业。"""
+    job_id = f"test-reload-preserve-{uuid4()}"
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def task():
+        """挂起直到测试放行，模拟仍在真实执行的作业。"""
+        started.set()
+        await release.wait()
+
+    scheduler = _build_scheduler(job_id, task)
+
+    async def run_task():
+        """启动作业后模拟一次不取消协程的热重载停止。"""
+        scheduler.start(job_id)
+        await started.wait()
+        assert len(scheduler._async_tasks) == 1
+
+        scheduler.stop(cancel_async_tasks=False)
+        await asyncio.sleep(0)
+        assert len(scheduler._async_tasks) == 1
+
+        release.set()
+        for _ in range(1000):
+            if not scheduler._async_tasks:
+                break
+            await asyncio.sleep(0)
+        assert scheduler._async_tasks == set()
+
+    asyncio.run(run_task())
+
+    progress = scheduler.get_progress(job_id)
+    assert progress.status == "success"
+
+
+def test_scheduler_finish_job_skips_stale_entry_after_reload():
+    """热重载替换作业登记表后，旧一轮协程的收尾不得覆盖新登记的运行状态。"""
+    job_id = f"test-stale-finish-{uuid4()}"
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def task():
+        """挂起后以失败收尾，验证该结果不会污染重载后的新登记条目。"""
+        started.set()
+        await release.wait()
+        raise RuntimeError("旧一轮的失败结果")
+
+    scheduler = _build_scheduler(job_id, task)
+
+    async def run_task():
+        """启动作业后模拟热重载把作业登记表整体替换为新对象。"""
+        scheduler.start(job_id)
+        await started.wait()
+
+        scheduler._jobs[job_id] = {
+            "name": "测试定时服务",
+            "provider_name": "测试",
+            "func": task,
+            "running": False,
+        }
+
+        release.set()
+        for _ in range(1000):
+            if not scheduler._async_tasks:
+                break
+            await asyncio.sleep(0)
+
+    asyncio.run(run_task())
+
+    current = scheduler._jobs[job_id]
+    assert current["running"] is False
+    assert "last_error" not in current
+    assert "last_finished_at" not in current
+
+
 def test_scheduler_records_cancelled_async_job_as_failed():
     """协程任务取消时运行时进度不得收敛为成功。"""
     job_id = f"test-cancelled-{uuid4()}"
@@ -226,7 +302,7 @@ def test_scheduler_async_stop_cancels_owned_async_jobs():
         scheduler.start(job_id)
         await started.wait()
         assert len(scheduler._async_tasks) == 1
-        await scheduler.async_stop(timeout_seconds=1)
+        await scheduler.stop_async(timeout_seconds=1)
 
     asyncio.run(run_task())
 

@@ -185,14 +185,22 @@ class SchedulerEngine:
             job_id: str,
             success: bool = True,
             error: Optional[str] = None,
+            *,
+            expected_job: Optional[dict] = None,
     ) -> None:
         """
         完成定时任务
+
+        :param expected_job: 启动时快照的作业条目；与当前登记条目不是同一对象时视为
+            热重载已经替换过该作业，跳过收尾以避免覆盖新一轮的运行状态。
         """
         finished_at = self._format_time()
         job = None
         with self._lock:
             job = self._jobs.get(job_id)
+            if expected_job is not None and job is not expected_job:
+                logger.debug(f"定时任务 {job_id} 已在热重载中被替换，跳过过期收尾")
+                return
             if job:
                 job["running"] = False
                 job["last_finished_at"] = finished_at
@@ -423,7 +431,9 @@ class SchedulerEngine:
             self.__handle_job_error(job_id=job_id, job=job, error=err)
         finally:
             # 协程收尾在事件循环上完成，同步路径（线程池/调用线程）提交到事件循环执行
-            await self.__finish_job(job_id=job_id, success=success, error=error)
+            await self.__finish_job(
+                job_id=job_id, success=success, error=error, expected_job=job
+            )
 
     def start(self, job_id: str, *args, **kwargs) -> None:
         """
@@ -501,7 +511,7 @@ class SchedulerEngine:
             if not deferred_finish:
                 # 同步上下文执行异步收尾：优先提交到当前/全局事件循环，无循环时新建循环
                 self._submit_to_loop(self.__finish_job(
-                    job_id=job_id, success=success, error=error
+                    job_id=job_id, success=success, error=error, expected_job=job
                 ))
 
     def _track_async_task(
@@ -551,7 +561,7 @@ class SchedulerEngine:
                 task.cancel()
         return tasks
 
-    async def async_stop(self, *, timeout_seconds: float = 30.0) -> None:
+    async def stop_async(self, *, timeout_seconds: float = 30.0) -> None:
         """异步关闭引擎，并在有限预算内等待自有协程任务收口。"""
         self.stop()
         tasks = tuple(getattr(self, "_async_tasks", ()))
@@ -683,11 +693,15 @@ class SchedulerEngine:
                 )
             return schedulers
 
-    def stop(self):
+    def stop(self, *, cancel_async_tasks: bool = True):
         """
         关闭定时服务
+
+        :param cancel_async_tasks: 是否取消引擎自行提交的协程任务；配置热重载只需要
+            重建触发器和作业登记表，不应打断仍在真实执行的作业。
         """
-        self._cancel_async_tasks()
+        if cancel_async_tasks:
+            self._cancel_async_tasks()
         with lock:
             try:
                 if self._scheduler:

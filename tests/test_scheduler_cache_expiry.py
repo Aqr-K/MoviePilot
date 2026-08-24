@@ -56,13 +56,13 @@ def test_scheduler_initializer_stop_preserves_sync_abi(monkeypatch):
 
     assert scheduler_initializer.stop_scheduler() is None
     scheduler.stop.assert_called_once_with()
-    scheduler.async_stop.assert_not_called()
+    scheduler.stop_async.assert_not_called()
 
 
 def test_scheduler_initializer_stop_awaits_in_running_loop(monkeypatch):
     """生命周期事件循环中的停止入口应返回可等待的异步收口。"""
     scheduler = Mock()
-    scheduler.async_stop = AsyncMock()
+    scheduler.stop_async = AsyncMock()
     monkeypatch.setattr(scheduler_initializer, "Scheduler", Mock(return_value=scheduler))
 
     async def scenario():
@@ -72,7 +72,7 @@ def test_scheduler_initializer_stop_awaits_in_running_loop(monkeypatch):
         await result
 
     asyncio.run(scenario())
-    scheduler.async_stop.assert_awaited_once_with()
+    scheduler.stop_async.assert_awaited_once_with()
     scheduler.stop.assert_not_called()
 
 
@@ -102,7 +102,7 @@ def test_clear_cache_is_manual_only(monkeypatch):
         "BackgroundScheduler",
         lambda **kwargs: background_scheduler,
     )
-    monkeypatch.setattr(Scheduler, "stop", lambda self: None)
+    monkeypatch.setattr(Scheduler, "stop", lambda self, **kwargs: None)
     monkeypatch.setattr(Scheduler, "init_workflow_jobs", lambda self: None)
     monkeypatch.setattr(Scheduler, "init_agent_task_jobs", lambda self: None)
     monkeypatch.setattr(Scheduler, "init_plugin_jobs", lambda self: None)

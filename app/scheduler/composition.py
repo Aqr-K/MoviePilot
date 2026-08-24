@@ -84,8 +84,8 @@ class Scheduler(
         初始化定时服务
         """
 
-        # 停止定时服务
-        self.stop()
+        # 停止定时服务；重建触发器不应打断仍在真实执行的协程作业
+        self.stop(cancel_async_tasks=False)
         self._accepting_async_tasks = True
 
         # 调试模式不启动定时服务

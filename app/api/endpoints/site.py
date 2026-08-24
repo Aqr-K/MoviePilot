@@ -182,6 +182,7 @@ async def cookie_cloud_sync(
 
 @router.get("/reset", summary="重置站点", response_model=_SchemaResponse[None])
 async def reset(
+    task_registry: Annotated[TaskRegistry, Depends(get_background_task_registry)],
     command: SiteMutationCommand = Depends(get_site_mutation_command),
     _: ApiPrincipal = Depends(get_current_active_superuser_async),
 ) -> Any:
@@ -189,11 +190,14 @@ async def reset(
     清空所有站点数据并重新同步CookieCloud站点信息
     """
     result = await command.reset()
-    get_configured_system_config().set(SystemConfigKey.IndexerSites, [])
-    get_configured_system_config().set(SystemConfigKey.RssSites, [])
-    # 启动定时服务
-    Scheduler().start("cookiecloud", manual=True)
-    # 插件站点删除
+    await get_configured_system_config().async_set(SystemConfigKey.IndexerSites, [])
+    await get_configured_system_config().async_set(SystemConfigKey.RssSites, [])
+    resolve_background_task_registry(task_registry).create_sync(
+        Scheduler().start,
+        job_id="cookiecloud",
+        owner="api.site.reset",
+        manual=True,
+    )
     return _SchemaResponse(success=result.success, message="站点已重置！")
 
 
