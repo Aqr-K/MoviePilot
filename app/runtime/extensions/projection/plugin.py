@@ -676,7 +676,8 @@ class PluginProjection:
                 continue
             try:
                 plugin_id, instance_id = split_instance_key(extension_id)
-                for api in plugin.get_api() or []:
+                for source_api in plugin.get_api() or []:
+                    api = dict(source_api)
                     api["path"] = f"/{extension_id}{api['path']}"
                     if not api.get("auth"):
                         api["auth"] = "apikey"

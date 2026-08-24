@@ -3,7 +3,7 @@ from typing import Any
 
 import httpx
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ValidationError
@@ -750,6 +750,73 @@ def test_plugin_routes_only_register_v1(monkeypatch):
 
     plugin_routes.remove_plugin_api("DemoPlugin")
     assert fake_app.routes == []
+
+
+async def test_plugin_routes_ignore_included_router_wrappers():
+    """动态插件路由更新应跳过 FastAPI include_router 的内部包装器。"""
+    from app.application.plugin import routes as plugin_routes
+
+    app = FastAPI()
+    included_router = APIRouter(prefix="/included")
+
+    @included_router.get("/health")
+    def included_health() -> dict[str, bool]:
+        """返回被聚合路由的健康状态。"""
+        return {"ok": True}
+
+    app.include_router(included_router)
+
+    async def plugin_dependency() -> None:
+        """提供用于验证动态路由依赖隔离的测试依赖。"""
+
+    source_dependencies = [Depends(plugin_dependency)]
+    plugin_api = {
+        "path": "/DemoPlugin/health",
+        "endpoint": lambda: {"plugin": True},
+        "methods": ["GET"],
+        "allow_anonymous": True,
+        "dependencies": source_dependencies,
+    }
+    plugin_routes.configure_plugin_routes(FastAPIDynamicRouteRegistry(
+        app=app,
+        plugin_ids=lambda: ["DemoPlugin"],
+        plugin_apis=lambda _plugin_id: [plugin_api],
+        verify_token=lambda: None,
+        verify_apikey=lambda: None,
+        prefix="/api/v1/plugin",
+        protected_routes=set(),
+        log=SimpleNamespace(debug=lambda *_args: None, error=lambda *_args: None),
+        route_matches=matches_extension,
+    ))
+
+    plugin_routes.register_plugin_api("DemoPlugin")
+    plugin_routes.register_plugin_api("DemoPlugin")
+
+    registered_path = "/api/v1/plugin/DemoPlugin/health"
+    registered_routes = [
+        route
+        for route in app.routes
+        if getattr(route, "path", None) == registered_path
+    ]
+    assert len(registered_routes) == 1
+    assert registered_routes[0].dependencies == plugin_api["dependencies"]
+    assert registered_routes[0].dependencies is not plugin_api["dependencies"]
+    assert plugin_api["path"] == "/DemoPlugin/health"
+    assert plugin_api["allow_anonymous"] is True
+    assert plugin_api["dependencies"] is source_dependencies
+
+    async with make_client(app) as client:
+        response = await client.get(registered_path)
+        assert response.status_code == 200
+        assert response.json() == {"plugin": True}
+
+        plugin_routes.remove_plugin_api("DemoPlugin")
+        assert not any(
+            getattr(route, "path", None) == registered_path for route in app.routes
+        )
+        removed_response = await client.get(registered_path)
+
+    assert removed_response.status_code == 404
 
 
 def test_response_router_uses_response_route_class():
