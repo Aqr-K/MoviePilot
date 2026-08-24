@@ -75,6 +75,7 @@ from app.application.orchestration.context import (
 from app.application.orchestration.transactional_events import (
     TransactionalChainDurableEventWriter,
 )
+from app.application.configuration import get_configured_system_config
 from app.application.service_config import (
     ServiceInstanceConfigService,
     configure_service_instance_configs,
@@ -125,7 +126,7 @@ async def _async_get_workflow(workflow_id: int):
 
 def configure_runtime_data_providers() -> None:
     """在启动组合层装配运行时和外部服务所需的数据库读取能力。"""
-    configure_service_config_reader(lambda key: SystemConfigOper().get(key))
+    configure_service_config_reader(lambda key: get_configured_system_config().get(key))
     configure_service_instance_configs(
         ServiceInstanceConfigService(repository=ServiceConfigOper())
     )
@@ -137,9 +138,9 @@ def configure_runtime_data_providers() -> None:
     )
     configure_server_application_services(
         report_service=ServerReportService(
-            config_reader=lambda key: SystemConfigOper().get(key),
-            config_writer=lambda key, value: SystemConfigOper().set(key, value),
-            installed_plugins_provider=lambda: SystemConfigOper().get(
+            config_reader=lambda key: get_configured_system_config().get(key),
+            config_writer=lambda key, value: get_configured_system_config().set(key, value),
+            installed_plugins_provider=lambda: get_configured_system_config().get(
                 SystemConfigKey.UserInstalledPlugins
             ) or [],
             subscribes_provider=lambda: SubscribeOper().list(),
@@ -312,7 +313,7 @@ def user_auth():
     sites_helper = SitesHelper()
     if sites_helper.auth_level >= 2:
         return
-    auth_conf = SystemConfigOper().get(SystemConfigKey.UserSiteAuthParams)
+    auth_conf = get_configured_system_config().get(SystemConfigKey.UserSiteAuthParams)
     status, msg = sites_helper.check_user(**auth_conf) if auth_conf else sites_helper.check_user()
     if status:
         logger.info(f"{msg} 用户认证成功")

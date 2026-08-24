@@ -16,6 +16,7 @@ from app.application.configuration import (
     TransferRetryConfig,
     configure_system_config,
     configure_transfer_retry_config,
+    get_configured_system_config,
 )
 from app.application.history import configure_transfer_history_provider
 from app.application.messaging.chat import (
@@ -264,7 +265,7 @@ def configure_application_service_ports() -> None:
     configure_auth_service(
         AuthService(
             users=UserOper(),
-            config=SystemConfigOper(),
+            config=get_configured_system_config(),
             passkeys=PassKeyOper(),
         )
     )
