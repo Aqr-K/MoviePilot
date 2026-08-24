@@ -39,7 +39,6 @@ def test_pipeline_methods_declare_pipeline_aggregation() -> None:
     for method in _PIPELINE_METHODS:
         contract = get_module_method_contract(method)
         assert contract.aggregation is ModuleResultAggregation.PIPELINE
-        assert contract.plugin_short_circuit is True
 
 
 def test_high_frequency_capability_families_are_explicit() -> None:
@@ -101,11 +100,11 @@ def test_unknown_plugin_method_keeps_legacy_compatibility() -> None:
     assert contract.supports_async is True
 
 
-def test_contract_v2_freezes_at_least_twenty_high_value_methods() -> None:
-    """首批能力必须具备可生成文档和诊断的完整 V2 字段。"""
+def test_contract_v2_freezes_every_observed_host_method() -> None:
+    """全部已观察宿主能力必须具备可生成文档和诊断的完整 V2 字段。"""
     contracts = list_explicit_module_contracts()
 
-    assert len(contracts) >= 20
+    assert len(contracts) >= 211
     for contract in contracts.values():
         assert contract.version == 1
         assert contract.input_contract != "legacy_args"

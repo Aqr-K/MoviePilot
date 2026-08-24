@@ -80,8 +80,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7034,
-  "edge_sha256": "668714dd60228638aef384ddcd69fcae25e2488ecdd607f145313825ec763bc9",
+  "edge_count": 7036,
+  "edge_sha256": "843484eeb2391f582e40fce2f9ba4de268ce9738296fed9c6e1a06d02bb8686a",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -5720,7 +5720,9 @@
     "app.runtime.event.binding -> app.runtime.log",
     "app.runtime.event.contracts -> app.schemas",
     "app.runtime.event.contracts -> app.schemas.event",
+    "app.runtime.event.contracts -> app.schemas.mediaserver",
     "app.runtime.event.contracts -> app.schemas.types",
+    "app.runtime.event.contracts -> app.schemas.workflow",
     "app.runtime.event.dispatch -> app.runtime",
     "app.runtime.event.dispatch -> app.runtime.correlation",
     "app.runtime.event.dispatch -> app.runtime.event",
