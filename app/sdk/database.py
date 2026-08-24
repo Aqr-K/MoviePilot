@@ -3,7 +3,6 @@
 from app.application.backup import BackupArtifact, BackupVerification
 from app.application.database import get_database_governance as _get_database_governance
 
-
 __all__ = [
     "BackupArtifact",
     "BackupVerification",
