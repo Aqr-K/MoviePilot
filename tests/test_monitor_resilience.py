@@ -1,8 +1,10 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from app.adapters.system.host import SystemUtils
 from app.monitor import LocalDirectoryWatcher, Monitor
 from app.monitor.recovery import RecoveryExecutor
+from app.runtime.config import settings
 
 
 def _build_watcher(tmp_path, force_polling):
@@ -45,6 +47,7 @@ def test_run_falls_back_to_polling_before_backoff(tmp_path, monkeypatch):
     快速模式失败应先降级为兼容模式重试，且降级不计入退避重启次数。
     """
     monkeypatch.setattr(LocalDirectoryWatcher, "RESTART_BACKOFF", (0,))
+    monkeypatch.setattr(SystemUtils, "is_network_filesystem", staticmethod(lambda _d: False))
     watcher = _build_watcher(tmp_path, force_polling=None)
     calls = []
 
@@ -63,6 +66,107 @@ def test_run_falls_back_to_polling_before_backoff(tmp_path, monkeypatch):
 
     assert calls == [None, True]
     assert watcher.restart_count == 0
+
+
+def test_run_degrade_resolves_network_poll_delay_from_directory(tmp_path, monkeypatch):
+    """
+    快速模式构造时判定为快速模式候选（poll_delay_ms 落到本地默认值），
+    运行期降级为轮询后必须按目录实际性质重新识别；目录是网络文件系统时
+    应改用网络扫描间隔，而不是沿用构造时的本地默认值。
+    """
+    monkeypatch.setattr(LocalDirectoryWatcher, "RESTART_BACKOFF", (0,))
+    monkeypatch.setattr(SystemUtils, "is_network_filesystem", staticmethod(lambda _d: True))
+    watcher = _build_watcher(tmp_path, force_polling=None)
+    assert watcher.poll_delay_ms == LocalDirectoryWatcher.POLL_DELAY_LOCAL_MS
+    calls = []
+
+    def fake_run_watch(force_polling):
+        calls.append(force_polling)
+        if len(calls) >= 2:
+            watcher.stop()
+        raise OSError("inotify watch limit reached")
+
+    monkeypatch.setattr(watcher, "_run_watch", fake_run_watch)
+
+    watcher._run()
+
+    assert calls == [None, True]
+    assert watcher.poll_delay_ms == LocalDirectoryWatcher.POLL_DELAY_NETWORK_MS
+
+
+def test_run_degrade_resolves_local_poll_delay_from_directory(tmp_path, monkeypatch):
+    """
+    降级为轮询时目录不是网络文件系统，应使用本地扫描间隔。
+    """
+    monkeypatch.setattr(LocalDirectoryWatcher, "RESTART_BACKOFF", (0,))
+    monkeypatch.setattr(SystemUtils, "is_network_filesystem", staticmethod(lambda _d: False))
+    watcher = _build_watcher(tmp_path, force_polling=None)
+    calls = []
+
+    def fake_run_watch(force_polling):
+        calls.append(force_polling)
+        if len(calls) >= 2:
+            watcher.stop()
+        raise OSError("inotify watch limit reached")
+
+    monkeypatch.setattr(watcher, "_run_watch", fake_run_watch)
+
+    watcher._run()
+
+    assert calls == [None, True]
+    assert watcher.poll_delay_ms == LocalDirectoryWatcher.POLL_DELAY_LOCAL_MS
+
+
+def test_run_degrade_poll_delay_honors_config_overrides(tmp_path, monkeypatch):
+    """
+    降级为轮询时应优先采用 MONITOR_POLL_DELAY_NETWORK / MONITOR_POLL_DELAY_LOCAL
+    配置覆盖值，而不是恒定的内置默认值。
+    """
+    monkeypatch.setattr(LocalDirectoryWatcher, "RESTART_BACKOFF", (0,))
+    monkeypatch.setattr(SystemUtils, "is_network_filesystem", staticmethod(lambda _d: True))
+    monkeypatch.setattr(settings, "MONITOR_POLL_DELAY_NETWORK", 9000)
+    watcher = _build_watcher(tmp_path, force_polling=None)
+    calls = []
+
+    def fake_run_watch(force_polling):
+        calls.append(force_polling)
+        if len(calls) >= 2:
+            watcher.stop()
+        raise OSError("inotify watch limit reached")
+
+    monkeypatch.setattr(watcher, "_run_watch", fake_run_watch)
+
+    watcher._run()
+
+    assert calls == [None, True]
+    assert watcher.poll_delay_ms == 9000
+
+
+def test_run_degrade_logs_resolved_poll_delay(tmp_path, monkeypatch):
+    """
+    降级为轮询时应把实际使用的扫描间隔与降级原因输出到日志，便于用户自查。
+    """
+    monkeypatch.setattr(LocalDirectoryWatcher, "RESTART_BACKOFF", (0,))
+    monkeypatch.setattr(SystemUtils, "is_network_filesystem", staticmethod(lambda _d: True))
+    watcher = _build_watcher(tmp_path, force_polling=None)
+    logger_warn = MagicMock()
+    monkeypatch.setattr("app.monitor.watcher.logger.warn", logger_warn)
+    calls = []
+
+    def fake_run_watch(force_polling):
+        calls.append(force_polling)
+        if len(calls) >= 2:
+            watcher.stop()
+        raise OSError("inotify watch limit reached")
+
+    monkeypatch.setattr(watcher, "_run_watch", fake_run_watch)
+
+    watcher._run()
+
+    assert calls == [None, True]
+    messages = [call.args[0] for call in logger_warn.call_args_list]
+    assert any(str(LocalDirectoryWatcher.POLL_DELAY_NETWORK_MS) in message for message in messages)
+    assert any(str(watcher.watch_path) in message for message in messages)
 
 
 def test_run_returns_when_stop_requested(tmp_path, monkeypatch):
@@ -316,3 +420,4 @@ def test_monitor_watches_mode_env_keys_for_hot_reload():
     assert SystemConfigKey.Directories.value in Monitor.CONFIG_WATCH
     assert "MONITOR_NETWORK_FAST_MODE" in Monitor.CONFIG_WATCH
     assert "MONITOR_POLL_DELAY_NETWORK" in Monitor.CONFIG_WATCH
+    assert "MONITOR_POLL_DELAY_LOCAL" in Monitor.CONFIG_WATCH

@@ -258,3 +258,95 @@ def test_compatibility_mode_still_wins_over_fast_mode_override(tmp_path, monkeyp
     use_polling, _, _, _ = decide_monitor_mode(tmp_path, "compatibility")
 
     assert use_polling is True
+
+
+def test_start_local_monitor_uses_network_poll_delay(tmp_path, monkeypatch):
+    """轮询目标是网络文件系统时，构造监控应传入网络扫描间隔。"""
+    from app.monitor import monitor as monitor_module
+
+    monitor, _ = _build_monitor()
+    monitor._pending_locals = []
+    monkeypatch.setattr(monitor_module, "decide_monitor_mode",
+                        lambda directory, mode: (True, "用户配置为兼容模式", None, None))
+    monkeypatch.setattr(SystemUtils, "is_network_filesystem", staticmethod(lambda _d: True))
+
+    captured = {}
+    real_watcher_cls = monitor_module.LocalDirectoryWatcher
+
+    class RecordingWatcher(real_watcher_cls):
+        """记录构造参数的监控替身，沿用真实类的默认间隔常量。"""
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(monitor_module, "LocalDirectoryWatcher", RecordingWatcher)
+
+    result = monitor._Monitor__start_local_monitor(mon_path=tmp_path, monitor_mode="compatibility")
+
+    assert result is True
+    assert captured["poll_delay_ms"] == real_watcher_cls.POLL_DELAY_NETWORK_MS
+
+
+def test_start_local_monitor_uses_local_poll_delay_override(tmp_path, monkeypatch):
+    """本地磁盘轮询应使用 MONITOR_POLL_DELAY_LOCAL 覆盖值，而不是恒定内置默认值。"""
+    from app.monitor import monitor as monitor_module
+
+    monitor, _ = _build_monitor()
+    monitor._pending_locals = []
+    monkeypatch.setattr(monitor_module, "decide_monitor_mode",
+                        lambda directory, mode: (True, "用户配置为兼容模式", None, None))
+    monkeypatch.setattr(SystemUtils, "is_network_filesystem", staticmethod(lambda _d: False))
+    monkeypatch.setattr(settings, "MONITOR_POLL_DELAY_LOCAL", 999)
+
+    captured = {}
+    real_watcher_cls = monitor_module.LocalDirectoryWatcher
+
+    class RecordingWatcher(real_watcher_cls):
+        """记录构造参数的监控替身，沿用真实类的默认间隔常量。"""
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(monitor_module, "LocalDirectoryWatcher", RecordingWatcher)
+
+    result = monitor._Monitor__start_local_monitor(mon_path=tmp_path, monitor_mode="compatibility")
+
+    assert result is True
+    assert captured["poll_delay_ms"] == 999
+
+
+def test_start_local_monitor_falls_back_to_local_default_poll_delay(tmp_path, monkeypatch):
+    """本地磁盘轮询未配置覆盖值时应回退到内置本地默认间隔。"""
+    from app.monitor import monitor as monitor_module
+
+    monitor, _ = _build_monitor()
+    monitor._pending_locals = []
+    monkeypatch.setattr(monitor_module, "decide_monitor_mode",
+                        lambda directory, mode: (True, "用户配置为兼容模式", None, None))
+    monkeypatch.setattr(SystemUtils, "is_network_filesystem", staticmethod(lambda _d: False))
+    monkeypatch.setattr(settings, "MONITOR_POLL_DELAY_LOCAL", 0)
+
+    captured = {}
+    real_watcher_cls = monitor_module.LocalDirectoryWatcher
+
+    class RecordingWatcher(real_watcher_cls):
+        """记录构造参数的监控替身，沿用真实类的默认间隔常量。"""
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(monitor_module, "LocalDirectoryWatcher", RecordingWatcher)
+
+    result = monitor._Monitor__start_local_monitor(mon_path=tmp_path, monitor_mode="compatibility")
+
+    assert result is True
+    assert captured["poll_delay_ms"] == real_watcher_cls.POLL_DELAY_LOCAL_MS

@@ -124,8 +124,8 @@ _plugin_log_dir_cache_lock = threading.RLock()
 # 覆盖的过期回落在读取时惰性判定并清理，不额外起后台线程扫描
 _plugin_level_overrides: Dict[Tuple[str, str], _PluginLevelOverride] = {}
 _plugin_level_lock = threading.RLock()
-# 快速闸阈值：取全局等级与全部未过期实例覆盖中最宽松（数值最小）的一档；
-# 只有通过这一闸门的日志才会继续做代价更高的栈回溯和按实例二次过滤
+# 快速闸阈值：取全局等级与全部未过期实例覆盖中最宽松（数值最小）的一档，是进程内任何
+# 一条日志可能适用的最低阈值；低于它的日志一定会被丢弃，无需再取当前绑定实例的精确阈值
 _plugin_level_floor: int = logging.INFO
 
 
@@ -685,19 +685,25 @@ class LoggerManager:
     def logger(self, method: str, msg: str, *args: Any, **kwargs: Any) -> None:
         """按调用来源路由并输出一条日志。
 
-        等级过滤分两级：先用快速闸（全局等级与全部实例覆盖中最宽松的一档）挡掉绝大多数
-        被丢弃的日志，不为它们支付栈回溯的代价；通过快速闸后才回溯定位调用来源，
-        再按命中的插件实例等级做一次精确过滤。这样只有确有实例开了更详细等级时，
-        才会有日志需要多付这次栈回溯成本。
+        等级过滤分两级，两级都在栈回溯之前完成：先用快速闸（全局等级与全部实例覆盖中
+        最宽松的一档）以一次整数比较挡掉绝大多数被丢弃的日志；再取本条日志实际适用的
+        阈值做精确过滤——绑定了插件实例时用该实例的等级，未绑定时用全局等级。未绑定的
+        日志即使栈回溯能归属到某个插件也定位不到实例，适用阈值同样是全局等级，因此无需
+        先回溯再判定。只有确定要输出的日志才回溯定位调用来源。
         """
         method_level = getattr(logging, method.upper(), logging.INFO)
         if method_level < _plugin_level_floor:
             return
+        bound_instance = _current_plugin_instance.get()
+        if bound_instance is not None:
+            threshold = _effective_instance_level_int(bound_instance[0], bound_instance[1])
+        else:
+            threshold = _current_global_log_level()
+        if method_level < threshold:
+            return
 
         caller_name, stack_plugin_name = self._get_caller()
         plugin_id, instance_id = self._resolve_plugin_instance(stack_plugin_name)
-        if plugin_id and method_level < _effective_instance_level_int(plugin_id, instance_id):
-            return
 
         formatted_msg = f"{caller_name} - {msg}"
         if args:

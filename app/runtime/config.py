@@ -454,6 +454,8 @@ class ConfigModel(BaseModel):
     MONITOR_NETWORK_FAST_MODE: bool = False
     # 网络文件系统的轮询扫描间隔（毫秒），0 表示使用内置默认值
     MONITOR_POLL_DELAY_NETWORK: int = 0
+    # 本地磁盘的轮询扫描间隔（毫秒），0 表示使用内置默认值
+    MONITOR_POLL_DELAY_LOCAL: int = 0
     # 新增目录延迟重扫的轮次延迟秒数，多个使用,分隔，如 "30,120,600,1800"。
     # FUSE 挂载（如 CloudDrive2）上超大目录树呈现完整内容可能超过分钟级，
     # 默认值在常见的 30/120 秒窗口后追加两轮成本极低的长延迟轮次兜底；

@@ -67,8 +67,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 6939,
-  "edge_sha256": "41c9020d853a67faa12846f24b91374c34b26dcc4bf299da7c952a0165170a3f",
+  "edge_count": 6940,
+  "edge_sha256": "2ecb60d5d312dd9a372fa3fd9ec35836e4eebee1fa345273117d39bfed8d51a5",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -5553,6 +5553,7 @@
     "app.monitor.watcher -> app.adapters",
     "app.monitor.watcher -> app.adapters.system",
     "app.monitor.watcher -> app.adapters.system.fsproxy",
+    "app.monitor.watcher -> app.adapters.system.host",
     "app.monitor.watcher -> app.runtime",
     "app.monitor.watcher -> app.runtime.config",
     "app.monitor.watcher -> app.runtime.log",

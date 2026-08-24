@@ -1193,6 +1193,45 @@ async def get_message(
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
+# 实时日志流轮询间隔（秒）：文件无新增内容时的退避间隔
+_LOG_STREAM_IDLE_INTERVAL = 0.5
+# 实时日志流增长节流间隔（秒）：文件持续增长时，批量读空当前已落盘的新行后
+# 仍短暂让出一次，避免高频写入场景下 stat/readline 零退避占满 anyio 线程池；
+# 相对日志的近实时展示需求，该间隔可忽略不计
+_LOG_STREAM_GROWTH_THROTTLE = 0.05
+
+
+async def _tail_new_lines(f, log_path: AsyncPath, initial_size: int, request: Request):
+    """
+    轮询日志文件增量内容并逐行产出 SSE 数据行。
+
+    文件持续增长时一次 stat 后批量读空当前已落盘的新行，避免每行都重新 stat
+    一次；无论本轮是否读到新内容，每轮结束都会节流让出，避免高频写入场景下
+    的零退避忙等。
+    :param f: 已定位到起始偏移的异步日志文件句柄
+    :param log_path: 日志文件路径
+    :param initial_size: 起始文件大小
+    :param request: 当前请求，用于检测客户端断开
+    """
+    while not global_vars.is_system_stopped:
+        if await request.is_disconnected():
+            return
+        current_stat = await log_path.stat()
+        current_size = current_stat.st_size
+        if current_size > initial_size:
+            while True:
+                line = await f.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if line:
+                    yield f"data: {line}\n\n"
+            initial_size = current_size
+            await asyncio.sleep(_LOG_STREAM_GROWTH_THROTTLE)
+        else:
+            await asyncio.sleep(_LOG_STREAM_IDLE_INTERVAL)
+
+
 @router.get(
     "/logging",
     summary="实时日志",
@@ -1289,24 +1328,9 @@ async def get_logging(
                 # 记录初始文件大小
                 initial_stat = await log_path.stat()
                 initial_size = initial_stat.st_size
-                # 实时监听新日志，使用更短的轮询间隔
-                while not global_vars.is_system_stopped:
-                    if await request.is_disconnected():
-                        break
-                    # 检查文件是否有新内容
-                    current_stat = await log_path.stat()
-                    current_size = current_stat.st_size
-                    if current_size > initial_size:
-                        # 文件有新内容，读取新行
-                        line = await f.readline()
-                        if line:
-                            line = line.strip()
-                            if line:
-                                yield f"data: {line}\n\n"
-                        initial_size = current_size
-                    else:
-                        # 没有新内容，短暂等待
-                        await asyncio.sleep(0.5)
+                # 实时监听新日志：文件持续增长时批量读取新行并节流让出，避免忙等
+                async for chunk in _tail_new_lines(f, log_path, initial_size, request):
+                    yield chunk
         except asyncio.CancelledError:
             return
         except Exception as err:

@@ -28,12 +28,13 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
     """
     目录监控门面，单例模式：装配本地/远程监控、维护生命周期与健康检查。
     """
-    # 除目录配置外，同时监听仅在监控线程创建时读取的环境变量：这两项经
+    # 除目录配置外，同时监听仅在监控线程创建时读取的环境变量：这些配置经
     # /system/env 保存后运行时值虽已更新，但已运行的监控不会重新决策模式，
     # 必须触发 init() 全量重建才能生效（MONITOR_RESCAN_DELAYS 为实时解析，无需在列）
     CONFIG_WATCH = {SystemConfigKey.Directories.value,
                     "MONITOR_NETWORK_FAST_MODE",
-                    "MONITOR_POLL_DELAY_NETWORK"}
+                    "MONITOR_POLL_DELAY_NETWORK",
+                    "MONITOR_POLL_DELAY_LOCAL"}
     # 目录监控健康检查间隔（秒）
     WATCHDOG_INTERVAL = 60
     # 连续多少个健康检查周期无新增重启后才宣告恢复，避免反复崩溃时告警刷屏
@@ -283,12 +284,18 @@ class Monitor(ConfigReloadMixin, metaclass=SingletonClass):
                     logger.info(
                         f"系统监控资源使用率: {usage_percent:.1f}% ({file_count}/{limits['max_user_watches']})")
 
-            # 网络/FUSE 挂载轮询降频，减少监控自身对挂载后端的持续 stat 压力
+            # 轮询模式下明确打出实际使用的扫描间隔，网络/FUSE 挂载降频以减少
+            # 监控自身对挂载后端的持续 stat 压力，本地磁盘同样支持配置覆盖
             poll_delay_ms = None
-            if use_polling and SystemUtils.is_network_filesystem(mon_path):
-                poll_delay_ms = (settings.MONITOR_POLL_DELAY_NETWORK
-                                 or LocalDirectoryWatcher.POLL_DELAY_NETWORK_MS)
-                logger.info(f"检测到网络文件系统，轮询扫描间隔调整为 {poll_delay_ms}ms: {mon_path}")
+            if use_polling:
+                if SystemUtils.is_network_filesystem(mon_path):
+                    poll_delay_ms = (settings.MONITOR_POLL_DELAY_NETWORK
+                                     or LocalDirectoryWatcher.POLL_DELAY_NETWORK_MS)
+                    logger.info(f"检测到网络文件系统，轮询扫描间隔调整为 {poll_delay_ms}ms: {mon_path}")
+                else:
+                    poll_delay_ms = (settings.MONITOR_POLL_DELAY_LOCAL
+                                     or LocalDirectoryWatcher.POLL_DELAY_LOCAL_MS)
+                    logger.info(f"轮询扫描间隔使用本地配置 {poll_delay_ms}ms: {mon_path}")
 
             watcher = LocalDirectoryWatcher(
                 mon_path=mon_path,

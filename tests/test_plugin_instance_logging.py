@@ -258,8 +258,8 @@ def test_fast_gate_skips_stack_walk_when_no_instance_widens_level(monkeypatch):
     assert call_count["value"] == 0
 
 
-def test_fast_gate_pays_stack_walk_cost_once_some_instance_widens_level(monkeypatch):
-    """只要有实例开了更详细等级，快速闸阈值就会放宽，DEBUG 才会触发栈回溯。"""
+def test_fast_gate_pays_stack_walk_cost_only_inside_the_widened_instance(monkeypatch):
+    """只有绑定到放宽等级实例的日志才付出栈回溯代价，同进程其余 DEBUG 仍被提前丢弃。"""
     call_count = {"value": 0}
     original = log_module.LoggerManager._get_caller
 
@@ -268,11 +268,87 @@ def test_fast_gate_pays_stack_walk_cost_once_some_instance_widens_level(monkeypa
         return original()
 
     monkeypatch.setattr(log_module.LoggerManager, "_get_caller", staticmethod(counting_get_caller))
+    log_module.set_plugin_instance_log_level("DemoPlugin", "verbose", "DEBUG")
+
+    log_module.logger.debug("host debug dropped before the stack walk")
+    assert call_count["value"] == 0
+
+    with log_module.bind_plugin_instance("DemoPlugin", "verbose"):
+        log_module.logger.debug("instance debug pays the stack walk")
+    assert call_count["value"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 6. 单个实例放宽等级不会击穿宿主日志的全局等级
+# ---------------------------------------------------------------------------
+
+
+def test_host_debug_stays_filtered_when_one_instance_opens_debug(fake_writer, monkeypatch):
+    """任一实例开了 DEBUG 时，未绑定实例的宿主 DEBUG 仍按全局等级丢弃。"""
+    _patch_stack_plugin_name(monkeypatch, None)
     log_module.set_plugin_instance_log_level("OtherPlugin", "verbose", "DEBUG")
 
-    log_module.logger.debug("now passes the fast gate")
+    log_module.logger.debug("host debug must not leak")
 
-    assert call_count["value"] == 1
+    assert not fake_writer.calls
+
+
+def test_stack_attributed_plugin_debug_stays_filtered_when_other_instance_opens_debug(
+    fake_writer, instance_log_dir_resolver, monkeypatch
+):
+    """实例定位不到时按全局等级过滤，不会因别的实例开了 DEBUG 而放行。"""
+    _patch_stack_plugin_name(monkeypatch, "DemoPlugin")
+    log_module.set_plugin_instance_log_level("OtherPlugin", "verbose", "DEBUG")
+
+    log_module.logger.debug("unattributed debug must not leak")
+
+    assert not fake_writer.calls
+
+
+def test_instance_with_debug_override_still_emits_its_own_debug(
+    fake_writer, instance_log_dir_resolver, monkeypatch
+):
+    """实例自己开了 DEBUG 时，绑定期内产生的 DEBUG 日志照常落到该实例目录。"""
+    _patch_stack_plugin_name(monkeypatch, None)
+    log_module.set_plugin_instance_log_level("DemoPlugin", "verbose", "DEBUG")
+
+    with log_module.bind_plugin_instance("DemoPlugin", "verbose"):
+        log_module.logger.debug("instance debug must be kept")
+
+    assert len(fake_writer.calls) == 1
+    _level, message, file_path = fake_writer.calls[0]
+    assert "instance debug must be kept" in message
+    expected_dir = instance_log_dir_resolver("DemoPlugin", "verbose")
+    assert file_path == expected_dir / log_module.PLUGIN_LOG_FILENAME
+
+
+def test_global_debug_keeps_host_debug_output(fake_writer, monkeypatch):
+    """全局等级为 DEBUG 时，宿主 DEBUG 照常输出。"""
+    _patch_stack_plugin_name(monkeypatch, None)
+    monkeypatch.setattr(log_module.log_settings, "LOG_LEVEL", "DEBUG")
+    log_module.refresh_plugin_level_floor()
+
+    log_module.logger.debug("host debug under global debug")
+
+    assert len(fake_writer.calls) == 1
+    _level, message, file_path = fake_writer.calls[0]
+    assert "host debug under global debug" in message
+    assert file_path == Path("/unused") / log_module.LoggerManager._default_log_file
+
+
+def test_global_debug_still_honours_stricter_instance_override(
+    fake_writer, instance_log_dir_resolver, monkeypatch
+):
+    """全局 DEBUG 时，实例设为 ERROR 仍能压制该实例自己的 DEBUG。"""
+    _patch_stack_plugin_name(monkeypatch, None)
+    monkeypatch.setattr(log_module.log_settings, "LOG_LEVEL", "DEBUG")
+    log_module.refresh_plugin_level_floor()
+    log_module.set_plugin_instance_log_level("DemoPlugin", "quiet", "ERROR")
+
+    with log_module.bind_plugin_instance("DemoPlugin", "quiet"):
+        log_module.logger.debug("instance debug must be suppressed")
+
+    assert not fake_writer.calls
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from watchfiles import Change, DefaultFilter, watch
 
+from app.adapters.system.host import SystemUtils
 from app.runtime.config import settings
 from app.runtime.log import logger
 
@@ -32,8 +33,12 @@ class LocalDirectoryWatcher:
     HEALTHY_UPTIME = 60
     # 超过该秒数监控循环没有任何活动，判定为静默失效
     STALL_TIMEOUT = 600
-    # 轮询模式目录扫描间隔（毫秒）：本地磁盘用 watchfiles 默认值
-    POLL_DELAY_LOCAL_MS = 300
+    # 轮询模式目录扫描间隔（毫秒）：本地磁盘默认值。轮询模式每个间隔都会递归
+    # stat 整棵目录树，watchfiles 上游 300ms 的默认值是为小型开发目录调校的；
+    # 媒体库触发轮询的场景（兼容模式/目录数逼近 inotify 上限）通常是十万级
+    # 文件的目录树，300ms 会让扫描线程持续占满一个核心。下载入库不要求亚秒级
+    # 实时性，2000ms 在几乎不影响使用体验的前提下把稳态扫描频率降到约 1/7
+    POLL_DELAY_LOCAL_MS = 2000
     # 网络/FUSE 挂载轮询降频，减少监控自身对挂载后端的持续 stat 压力
     POLL_DELAY_NETWORK_MS = 5000
     # 新增目录延迟重扫的间隔秒数默认值：FUSE 上目录内容的可见性有延迟，首次展开时
@@ -199,6 +204,7 @@ class LocalDirectoryWatcher:
                 if force_polling is not True:
                     logger.warn(f"快速模式监控 {self._watch_path} 失败，将自动切换到兼容模式: {err}")
                     force_polling = True
+                    self._resolve_polling_delay()
                     continue
                 if time.monotonic() - started_at >= self.HEALTHY_UPTIME:
                     # 上一轮监控已稳定运行过，重新从最短间隔开始退避
@@ -210,6 +216,23 @@ class LocalDirectoryWatcher:
                              f"（累计第 {self._restart_count} 次）: {self._watch_path} - {err}")
                 if self._stop_event.wait(timeout=delay):
                     return
+
+    def _resolve_polling_delay(self):
+        """
+        快速模式降级为轮询时，按目录当前的文件系统性质重新决定扫描间隔。
+
+        构造阶段若判定为快速模式候选，poll_delay_ms 会落到本地默认值；一旦
+        运行期降级为轮询，必须重新识别目录性质，网络文件系统改用网络间隔，
+        否则会用本地间隔高频轮询网络挂载
+        """
+        if SystemUtils.is_network_filesystem(self._watch_path):
+            self._poll_delay_ms = settings.MONITOR_POLL_DELAY_NETWORK or self.POLL_DELAY_NETWORK_MS
+            logger.warn(f"降级轮询目录判定为网络文件系统，扫描间隔调整为 "
+                        f"{self._poll_delay_ms}ms: {self._watch_path}")
+        else:
+            self._poll_delay_ms = settings.MONITOR_POLL_DELAY_LOCAL or self.POLL_DELAY_LOCAL_MS
+            logger.warn(f"降级轮询目录判定为本地磁盘，扫描间隔调整为 "
+                        f"{self._poll_delay_ms}ms: {self._watch_path}")
 
     def _run_watch(self, force_polling: Optional[bool]):
         """

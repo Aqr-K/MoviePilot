@@ -6,6 +6,7 @@ import threading
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -236,3 +237,132 @@ def test_download_log_zip_generation_runs_outside_event_loop_thread(monkeypatch,
 async def _read_streaming_body(response) -> bytes:
     """读取 StreamingResponse 内容，便于断言 zip 文件条目。"""
     return b"".join([chunk async for chunk in response.body_iterator])
+
+
+class _FakeLogStat:
+    """测试用文件状态替身，只携带 st_size。"""
+
+    def __init__(self, size: int):
+        self.st_size = size
+
+
+class _FakeLogPath:
+    """测试用日志路径替身，按预设序列依次返回文件大小。"""
+
+    def __init__(self, sizes):
+        self._sizes = list(sizes)
+
+    async def stat(self) -> _FakeLogStat:
+        """按调用顺序弹出预设大小。"""
+        return _FakeLogStat(self._sizes.pop(0))
+
+
+class _FakeLogFile:
+    """测试用日志文件句柄替身，按批次返回新增行，批次读空后返回空字符串。"""
+
+    def __init__(self, batches):
+        self._batches = [list(batch) for batch in batches]
+        self.readline_calls = 0
+
+    async def readline(self) -> str:
+        """模拟持续增长场景下逐行读取，一批读空后返回空字符串。"""
+        self.readline_calls += 1
+        if not self._batches:
+            return ""
+        current = self._batches[0]
+        if current:
+            return current.pop(0) + "\n"
+        self._batches.pop(0)
+        return ""
+
+
+class _FakeLogRequest:
+    """测试用请求替身，达到预设轮次后判定为已断开，驱动循环结束。"""
+
+    def __init__(self, disconnect_after: int):
+        self._count = 0
+        self._disconnect_after = disconnect_after
+
+    async def is_disconnected(self) -> bool:
+        """记录调用轮次，超过预设轮次后判定为已断开。"""
+        self._count += 1
+        return self._count > self._disconnect_after
+
+
+def test_tail_new_lines_throttles_during_continuous_growth():
+    """
+    文件持续增长时循环不能零退避空转：每轮读空当前新行后仍需节流让出一次，
+    不能因为一直有新内容就跳过所有 sleep。
+    """
+    log_path = _FakeLogPath(sizes=[10, 20, 20])
+    log_file = _FakeLogFile(batches=[["line1", "line2"], ["line3"]])
+    request = _FakeLogRequest(disconnect_after=3)
+    sleep_calls = []
+
+    async def fake_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    with patch.object(system_endpoint.asyncio, "sleep", fake_sleep):
+        collected = asyncio.run(_drain_tail_new_lines(log_file, log_path, 0, request))
+
+    assert collected == ["data: line1\n\n", "data: line2\n\n", "data: line3\n\n"]
+    # 两轮增长后各有一次节流 sleep，第三轮无新内容用空闲间隔 sleep，全程没有 0 间隔的忙等
+    assert len(sleep_calls) == 3
+    assert all(delay > 0 for delay in sleep_calls)
+    assert sleep_calls[:2] == [system_endpoint._LOG_STREAM_GROWTH_THROTTLE] * 2
+    assert sleep_calls[2] == system_endpoint._LOG_STREAM_IDLE_INTERVAL
+    # 一次 stat 后批量读空当前新行，往返次数应远少于「每行一次 stat」
+    assert log_file.readline_calls == 5
+
+
+def test_tail_new_lines_stops_when_request_disconnects():
+    """客户端断开后循环应立即结束，不再继续轮询文件。"""
+    log_path = _FakeLogPath(sizes=[10])
+    log_file = _FakeLogFile(batches=[["line1"]])
+    request = _FakeLogRequest(disconnect_after=0)
+
+    collected = asyncio.run(_drain_tail_new_lines(log_file, log_path, 0, request))
+
+    assert collected == []
+
+
+async def _drain_tail_new_lines(f, log_path, initial_size, request):
+    """驱动 _tail_new_lines 生成器并收集全部产出，便于断言。"""
+    return [chunk async for chunk in system_endpoint._tail_new_lines(f, log_path, initial_size, request)]
+
+
+def test_get_logging_stream_delegates_realtime_tail_to_helper(monkeypatch, isolated_log_path):
+    """实时日志流应通过 _tail_new_lines 节流轮询增量内容，而不是内联零退避轮询。"""
+    (isolated_log_path / "moviepilot.log").write_text("history line\n", encoding="utf-8")
+
+    async def fake_tail(f, log_path, initial_size, request):
+        """替身：跳过真实文件轮询，直接产出两条实时数据行。"""
+        yield "data: realtime-1\n\n"
+        yield "data: realtime-2\n\n"
+
+    monkeypatch.setattr(system_endpoint, "_tail_new_lines", fake_tail)
+
+    async def never_disconnected() -> bool:
+        return False
+
+    async def run():
+        response = await system_endpoint.get_logging(
+            request=SimpleNamespace(is_disconnected=never_disconnected),
+            length=5,
+            logfile="moviepilot.log",
+            _=SimpleNamespace(id=1, name="admin", is_superuser=True),
+        )
+        collected = []
+        async for chunk in response.body_iterator:
+            collected.append(chunk)
+            if len(collected) >= 3:
+                break
+        return collected
+
+    chunks = asyncio.run(run())
+
+    assert chunks == [
+        "data: history line\n\n",
+        "data: realtime-1\n\n",
+        "data: realtime-2\n\n",
+    ]
