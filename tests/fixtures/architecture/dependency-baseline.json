@@ -80,8 +80,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7039,
-  "edge_sha256": "9f3c4a6cea57704aea4c8e349b9bd1b03edca2bae113f20a1e21a263d74699c3",
+  "edge_count": 7042,
+  "edge_sha256": "f460c0ba2b60454ebd587b467a06dcae6120cffa93dd44069d5ae40709197ea2",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -329,9 +329,11 @@
     "app.agent.memory -> app.schemas.agent",
     "app.agent.middleware.activity_log -> app.agent",
     "app.agent.middleware.activity_log -> app.agent.llm",
+    "app.agent.middleware.activity_log -> app.agent.llm.helper",
     "app.agent.middleware.activity_log -> app.agent.middleware",
     "app.agent.middleware.activity_log -> app.agent.middleware.utils",
     "app.agent.middleware.activity_log -> app.agent.policy",
+    "app.agent.middleware.activity_log -> app.agent.policy.sanitizer",
     "app.agent.middleware.activity_log -> app.agent.tools",
     "app.agent.middleware.activity_log -> app.agent.tools.tags",
     "app.agent.middleware.activity_log -> app.runtime",
@@ -438,6 +440,7 @@
     "app.agent.orchestrator -> app.runtime.config",
     "app.agent.orchestrator -> app.runtime.events",
     "app.agent.orchestrator -> app.runtime.log",
+    "app.agent.orchestrator -> app.runtime.observability",
     "app.agent.orchestrator -> app.schemas",
     "app.agent.orchestrator -> app.schemas.event",
     "app.agent.orchestrator -> app.schemas.message",
