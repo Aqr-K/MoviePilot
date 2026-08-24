@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import threading
 from typing import Any
@@ -134,7 +135,18 @@ def is_tool_factory_materialized() -> bool:
 
 
 async def close_materialized_terminal_sessions() -> None:
-    """关闭已物化的终端会话管理器，不触发新的 Agent 工具导入。"""
+    """关闭已物化的终端会话管理器，不触发新的 Agent 工具导入。
+
+    终端会话管理器内部使用 asyncio 原生锁与子进程管道，只能在 asyncio
+    事件循环驱动下工作。当前协程若并非由 asyncio 事件循环驱动（例如被
+    其他异步后端调用），说明不可能通过该管理器建立过真实的终端会话，
+    直接跳过即可，避免对不兼容的事件循环调用 asyncio 原生同步原语。
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
     module = sys.modules.get("app.agent.tools.impl._terminal_session")
     manager = getattr(module, "terminal_session_manager", None) if module else None
     close = getattr(manager, "close", None)
