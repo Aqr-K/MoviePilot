@@ -1,12 +1,12 @@
 {
   "model_decorators": {
     "by_kind": {
-      "async_db_query": 21,
+      "async_db_query": 16,
       "async_db_update": 5,
-      "db_query": 33,
+      "db_query": 26,
       "db_update": 12
     },
-    "count": 71,
+    "count": 59,
     "methods": [
       {
         "decorator": "async_db_query",
@@ -47,41 +47,6 @@
         "decorator": "db_update",
         "file": "app/db/models/downloadfailure.py",
         "method": "DownloadFailure.record_failure"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/mediaserver.py",
-        "method": "MediaServerItem.async_exist_by_media_identity"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/mediaserver.py",
-        "method": "MediaServerItem.async_exists_by_title"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/mediaserver.py",
-        "method": "MediaServerItem.async_get_by_itemid"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/mediaserver.py",
-        "method": "MediaServerItem.exist_by_media_identity"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/mediaserver.py",
-        "method": "MediaServerItem.exists_by_title"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/mediaserver.py",
-        "method": "MediaServerItem.get_by_itemid"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/mediaserver.py",
-        "method": "MediaServerItem.get_by_server_itemid"
       },
       {
         "decorator": "async_db_query",
@@ -242,31 +207,6 @@
         "decorator": "db_query",
         "file": "app/db/models/sitestatistic.py",
         "method": "SiteStatistic.get_by_domain"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/siteuserdata.py",
-        "method": "SiteUserData.async_get_by_domain"
-      },
-      {
-        "decorator": "async_db_query",
-        "file": "app/db/models/siteuserdata.py",
-        "method": "SiteUserData.async_get_latest"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/siteuserdata.py",
-        "method": "SiteUserData.get_by_date"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/siteuserdata.py",
-        "method": "SiteUserData.get_by_domain"
-      },
-      {
-        "decorator": "db_query",
-        "file": "app/db/models/siteuserdata.py",
-        "method": "SiteUserData.get_latest"
       },
       {
         "decorator": "async_db_query",
