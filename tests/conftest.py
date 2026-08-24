@@ -227,6 +227,27 @@ def configure_llm_operations_port():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_terminal_session_manager():
+    """用例结束后复位终端会话管理器单例，避免模拟关闭污染后续用例。
+
+    ``terminal_session_manager`` 是进程级单例，真实生产环境只在应用整体
+    退出时调用一次 ``close()``。测试套件里分布在多个文件的用例会通过
+    ``stop_agent``/``begin_agent_shutdown`` 模拟应用关闭，若不复位，第一个
+    触发真实 ``close()`` 的用例会把单例永久关闭，导致同一 pytest 进程内
+    后续所有需要启动终端会话的用例都收到「终端会话管理器已关闭」。
+    """
+    yield
+    module = sys.modules.get("app.agent.tools.impl._terminal_session")
+    manager = getattr(module, "terminal_session_manager", None) if module else None
+    if manager is None:
+        return
+    manager._closed = False
+    manager._sessions.clear()
+    manager._starting = 0
+    manager._starts_idle.set()
+
+
 class DbHarness:
     """真实数据库会话的测试载具。
 
