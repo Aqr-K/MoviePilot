@@ -51,7 +51,7 @@ from lark_oapi.event.callback.model.p2_card_action_trigger import (
 )
 
 from app.runtime.config import settings
-from app.application.messaging.ingress import submit_message_to_host
+from app.adapters.network.message_ingress import submit_message_to_host
 from app.domain.context import Context, MediaInfo
 from app.db.oper.user import UserOper
 from app.runtime.channels import matches_channel_admin

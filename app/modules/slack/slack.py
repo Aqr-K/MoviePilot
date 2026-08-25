@@ -9,7 +9,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_sdk import WebClient
 
 from app.runtime.config import settings
-from app.application.messaging.ingress import forward_message_to_host
+from app.adapters.network.message_ingress import forward_message_to_host
 from app.domain.context import MediaInfo, Context
 from app.domain.metainfo import MetaInfo
 from app.runtime.log import logger

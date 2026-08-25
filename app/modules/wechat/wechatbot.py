@@ -13,7 +13,7 @@ from Crypto.Cipher import AES
 
 from app.runtime.cache import FileCache
 from app.runtime.config import settings
-from app.application.messaging.ingress import submit_message_to_host
+from app.adapters.network.message_ingress import submit_message_to_host
 from app.domain.context import MediaInfo, Context
 from app.domain.metainfo import MetaInfo
 from app.runtime.channels import matches_channel_admin

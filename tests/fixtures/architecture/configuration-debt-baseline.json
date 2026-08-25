@@ -36,7 +36,7 @@
     "root": "app"
   },
   "settings_imports": {
-    "count": 173,
+    "count": 174,
     "files": [
       "app/adapters/cache/backends.py",
       "app/adapters/cache/redis.py",
@@ -47,6 +47,7 @@
       "app/adapters/media/image.py",
       "app/adapters/network/browser.py",
       "app/adapters/network/doh.py",
+      "app/adapters/network/message_ingress.py",
       "app/adapters/network/urlsafety.py",
       "app/adapters/system/fsproxy.py",
       "app/adapters/system/plugin/dependency.py",

@@ -9,7 +9,7 @@ from discord import app_commands
 from fastapi.concurrency import run_in_threadpool
 
 from app.runtime.config import settings
-from app.application.messaging.ingress import async_forward_message_to_host
+from app.adapters.network.message_ingress import async_forward_message_to_host
 from app.domain.context import MediaInfo, Context
 from app.domain.metainfo import MetaInfo
 from app.runtime.log import logger

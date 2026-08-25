@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from app.application.messaging import ingress
+from app.adapters.network import message_ingress as ingress
 from app.modules.discord import discord as discord_module
 from app.modules.feishu import feishu as feishu_module
 from app.modules.qqbot import qqbot as qqbot_module

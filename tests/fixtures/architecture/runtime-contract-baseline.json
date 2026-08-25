@@ -2656,7 +2656,7 @@
           },
           {
             "caller": "app.startup.dataports_initializer",
-            "count": 2
+            "count": 3
           }
         ]
       },
@@ -2771,7 +2771,7 @@
         ]
       }
     },
-    "producer_count": 78
+    "producer_count": 79
   },
   "module_method_specs": {
     "anilist_credits": {
