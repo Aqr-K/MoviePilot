@@ -556,6 +556,22 @@ def test_database_internals_do_not_import_db_facades():
     assert violations == []
 
 
+def test_plugin_sdk_does_not_import_or_export_host_models():
+    """插件 SDK 只能暴露 Oper，不得把宿主 ORM Model 作为插件接口。"""
+    violations: list[str] = []
+    for path in (APP_ROOT / "sdk").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module and (
+                node.module == "app.db.models"
+                or node.module.startswith("app.db.models.")
+            ):
+                violations.append(
+                    f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}:{node.module}"
+                )
+    assert violations == []
+
+
 def test_migrated_modules_are_not_in_import_cycles():
     """任何 canonical 迁移模块都不得进入完整应用依赖图的环。"""
     modules = _discover_modules()

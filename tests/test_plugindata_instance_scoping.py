@@ -35,9 +35,10 @@ def test_get_plugin_data_defaults_to_default_instance_only(db):
     rows = PluginData.get_plugin_data(db.session, "ScopePluginA")
 
     assert {row.instance_id for row in rows} == {DEFAULT_INSTANCE_ID}
-    assert asyncio.run(
-        PluginData.async_get_plugin_data(plugin_id="ScopePluginA")
-    )[0].instance_id == DEFAULT_INSTANCE_ID
+    async_rows = db.run_async_session(
+        lambda session: PluginData.async_get_plugin_data(session, "ScopePluginA")
+    )
+    assert async_rows[0].instance_id == DEFAULT_INSTANCE_ID
 
 
 def test_get_plugin_data_by_key_scopes_to_requested_instance(db):

@@ -21,7 +21,11 @@ class PluginDataOper(DbOper):
         :param value: 数据值
         :param instance_id: 实例标识，默认取默认实例
         """
-        plugin = PluginData.get_plugin_data_by_key(self._db, plugin_id, key, instance_id)
+        plugin = self._execute_sync_query(
+            lambda session: PluginData.get_plugin_data_by_key(
+                session, plugin_id, key, instance_id
+            )
+        )
         if plugin:
             self._stage_update(plugin, {
                 "value": value
@@ -41,8 +45,10 @@ class PluginDataOper(DbOper):
         :param value: 数据值
         :param instance_id: 实例标识，默认取默认实例
         """
-        plugin = await PluginData.async_get_plugin_data_by_key(
-            self._db, plugin_id, key, instance_id
+        plugin = await self._execute_async_query(
+            lambda session: PluginData.async_get_plugin_data_by_key(
+                session, plugin_id, key, instance_id
+            )
         )
         if plugin:
             await self._stage_async_update(plugin, {"value": value})
@@ -60,12 +66,18 @@ class PluginDataOper(DbOper):
         :param instance_id: 实例标识，默认取默认实例
         """
         if key:
-            data = PluginData.get_plugin_data_by_key(self._db, plugin_id, key, instance_id)
+            data = self._execute_sync_query(
+                lambda session: PluginData.get_plugin_data_by_key(
+                    session, plugin_id, key, instance_id
+                )
+            )
             if not data:
                 return None
             return data.value
         else:
-            return PluginData.get_plugin_data(self._db, plugin_id, instance_id)
+            return self._execute_sync_query(
+                lambda session: PluginData.get_plugin_data(session, plugin_id, instance_id)
+            )
 
     async def async_get_data(self, plugin_id: str, key: Optional[str] = None,
                               instance_id: str = DEFAULT_INSTANCE_ID) -> Any:
@@ -76,13 +88,17 @@ class PluginDataOper(DbOper):
         :param instance_id: 实例标识，默认取默认实例
         """
         if key:
-            data = await PluginData.async_get_plugin_data_by_key(
-                self._db, plugin_id, key, instance_id
+            data = await self._execute_async_query(
+                lambda session: PluginData.async_get_plugin_data_by_key(
+                    session, plugin_id, key, instance_id
+                )
             )
             if not data:
                 return None
             return data.value
-        return await PluginData.async_get_plugin_data(self._db, plugin_id, instance_id)
+        return await self._execute_async_query(
+            lambda session: PluginData.async_get_plugin_data(session, plugin_id, instance_id)
+        )
 
     def del_data(self, plugin_id: str, key: Optional[str] = None,
                  instance_id: Optional[str] = None) -> Any:
@@ -98,7 +114,7 @@ class PluginDataOper(DbOper):
         :param instance_id: 实例标识，为 None 时跨全部实例删除
         """
         def stage(session: Session) -> None:
-            """把兼容删除入口映射到调用方或组合根持有的事务。"""
+            """把删除入口映射到调用方或组合根持有的事务。"""
             if key:
                 PluginData.del_plugin_data_by_key(session, plugin_id, key, instance_id)
             else:
@@ -127,7 +143,11 @@ class PluginDataOper(DbOper):
         :param plugin_id: 插件id
         :param instance_id: 实例标识，默认取默认实例
         """
-        return PluginData.get_plugin_data_by_plugin_id(self._db, plugin_id, instance_id)
+        return self._execute_sync_query(
+            lambda session: PluginData.get_plugin_data_by_plugin_id(
+                session, plugin_id, instance_id
+            )
+        )
 
     async def async_get_data_all(self, plugin_id: str, instance_id: str = DEFAULT_INSTANCE_ID) -> Any:
         """
@@ -135,4 +155,8 @@ class PluginDataOper(DbOper):
         :param plugin_id: 插件id
         :param instance_id: 实例标识，默认取默认实例
         """
-        return await PluginData.async_get_plugin_data_by_plugin_id(self._db, plugin_id, instance_id)
+        return await self._execute_async_query(
+            lambda session: PluginData.async_get_plugin_data_by_plugin_id(
+                session, plugin_id, instance_id
+            )
+        )

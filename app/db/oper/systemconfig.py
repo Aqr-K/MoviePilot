@@ -38,7 +38,9 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
             old_value = self.__SYSTEMCONF.get(key)
             # 更新内存(deepcopy避免内存共享)
             self.__SYSTEMCONF[key] = copy.deepcopy(value)
-            conf = SystemConfig.get_by_key(self._db, key)
+            conf = self._execute_sync_query(
+                lambda session: SystemConfig.get_by_key(session, key)
+            )
             if conf:
                 if old_value != value:
                     # 假值（False/0/None/空容器）同样落库而不是删除记录：
@@ -61,7 +63,9 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
         if isinstance(key, SystemConfigKey):
             key = key.value
         async with self._alock:
-            conf = await SystemConfig.async_get_by_key(self._db, key)
+            conf = await self._execute_async_query(
+                lambda session: SystemConfig.async_get_by_key(session, key)
+            )
             # 确定是否需要更新数据库
             needs_db_update = False
             if conf:
@@ -130,7 +134,9 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
             # 更新内存
             self.__SYSTEMCONF.pop(key, None)
             # 写入数据库
-            conf = SystemConfig.get_by_key(self._db, key)
+            conf = self._execute_sync_query(
+                lambda session: SystemConfig.get_by_key(session, key)
+            )
             if conf:
                 self._stage_delete(SystemConfig, conf.id)
             return True
@@ -144,7 +150,9 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
         if isinstance(key, SystemConfigKey):
             key = key.value
         async with self._alock:
-            conf = await SystemConfig.async_get_by_key(self._db, key)
+            conf = await self._execute_async_query(
+                lambda session: SystemConfig.async_get_by_key(session, key)
+            )
             with self._rlock:
                 # 更新内存
                 self.__SYSTEMCONF.pop(key, None)
