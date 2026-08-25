@@ -29,9 +29,9 @@ from app.domain.meta.metabase import MetaBase
 from app.domain.meta.metamusic import MetaMusic
 from app.domain.metainfo import MetaInfo
 from app.application.orchestration.data import (
-    DownloadFailurePortProxy as DownloadFailureOper,
-    DownloadHistoryPortProxy as DownloadHistoryOper,
-    MediaServerPortProxy as MediaServerOper,
+    get_chain_download_failure_port,
+    get_chain_download_history_port,
+    get_chain_media_server_port,
 )
 from app.application.directory import DirectoryHelper, validate_download_save_path
 from app.application.download.tasks import DownloadTaskService
@@ -859,7 +859,7 @@ class DownloadChain(ChainBase):
         torrent = context.torrent_info
         site = getattr(torrent, "site", None)
         try:
-            DownloadFailureOper().record_failure(
+            get_chain_download_failure_port().record_failure(
                 fingerprint=fingerprint,
                 now_time=now_time,
                 next_retry_at=next_retry_at,
@@ -905,7 +905,7 @@ class DownloadChain(ChainBase):
             return {}
         now_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         try:
-            return DownloadFailureOper().get_active_by_fingerprints(
+            return get_chain_download_failure_port().get_active_by_fingerprints(
                 fingerprints=fingerprints, now_time=now_time,
             )
         except Exception as err:
@@ -1292,7 +1292,7 @@ class DownloadChain(ChainBase):
                 )
             else:
                 # 显式注入旧测试上下文时保持兼容；正式启动上下文总会提供 durable writer。
-                downloadhis = DownloadHistoryOper()
+                downloadhis = get_chain_download_history_port()
                 downloadhis.add(**history_payload)
                 if files_to_add:
                     downloadhis.add_files(files_to_add)
@@ -1950,7 +1950,7 @@ class DownloadChain(ChainBase):
         if not totals:
             totals = {}
 
-        mediaserver = MediaServerOper()
+        mediaserver = get_chain_media_server_port()
         if mediainfo.type == MediaType.MOVIE:
             # 电影
             itemid = mediaserver.get_item_id(mtype=mediainfo.type.value,
@@ -2113,7 +2113,7 @@ class DownloadChain(ChainBase):
         """构造绑定当前下载器能力与历史仓储的任务服务。"""
         return DownloadTaskService(
             list_torrents=self.list_torrents,
-            get_history_by_hashes=DownloadHistoryOper().get_by_hashes,
+            get_history_by_hashes=get_chain_download_history_port().get_by_hashes,
             start_torrents=self.start_torrents,
             stop_torrents=self.stop_torrents,
             remove_torrents=self.remove_torrents,
