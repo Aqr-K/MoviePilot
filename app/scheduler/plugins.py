@@ -11,9 +11,9 @@ from typing import Optional
 from apscheduler.jobstores.base import JobLookupError
 
 from app.application.orchestration.scheduler import SchedulerChain
+from app.application.plugin.runtime import get_plugin_manager as PluginManager
 from app.runtime.events import Event, eventmanager
 from app.runtime.extensions.contract.instance import matches_extension, split_instance_key
-from app.runtime.extensions.plugin_manager import PluginManager
 from app.runtime.log import logger, wrap_for_plugin_instance
 from app.schemas.types import EventType
 
