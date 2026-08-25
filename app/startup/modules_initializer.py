@@ -67,6 +67,7 @@ from app.startup.managed_resources_initializer import (
     init_managed_resources,
     stop_managed_resources,
 )
+from app.adapters.network.urlsafety import close_image_proxy_block_log_coalescer
 from app.adapters.web.security.access import set_superuser_token_payload_provider
 from app.application.security.auth import build_superuser_token_payload
 from app.application.image import configure_wallpaper_providers
@@ -378,6 +379,7 @@ async def stop_modules():
             logger.error(f"关闭{name}失败：{err}")
 
     await run_step("AI智能体", stop_agent)
+    await run_step("图片代理安全日志合并器", close_image_proxy_block_log_coalescer)
     await run_step("模块", lambda: ModuleManager().shutdown())
     await run_step("事件消费", lambda: EventManager().stop_async())
     await run_step("浏览器会话", close_browser_sessions)
