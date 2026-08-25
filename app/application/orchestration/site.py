@@ -11,7 +11,7 @@ from app.application.orchestration import ChainBase
 from app.application.orchestration._interaction import InteractionChainMixin
 from app.runtime.config import global_vars, settings
 from app.runtime.events import Event, eventmanager
-from app.application.orchestration.data import SitePortProxy as SiteOper
+from app.application.orchestration.data import get_chain_site_port
 from app.application.configuration import get_configured_system_config
 from app.adapters.network.browser import PlaywrightHelper
 from app.adapters.network.cloudflare import under_challenge
@@ -68,7 +68,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
         """
         userdata: SiteUserData = self.unicast("refresh_userdata", site=site)
         if userdata:
-            SiteOper().update_userdata(domain=site_rules.extract_domain(site.get("domain")),
+            get_chain_site_port().update_userdata(domain=site_rules.extract_domain(site.get("domain")),
                                        name=site.get("name"),
                                        payload=userdata.model_dump())
             # 发送事件
@@ -442,7 +442,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
         _add_count = 0
         _fail_count = 0
         siteshelper = SitesHelper()
-        siteoper = SiteOper()
+        siteoper = get_chain_site_port()
         rsshelper = RssHelper()
         total_num = len(cookies)
         for index, (domain, cookie) in enumerate(cookies.items(), start=1):
@@ -599,7 +599,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
         if str(domain).startswith("http"):
             domain = site_rules.extract_domain(domain)
         # 站点信息
-        siteoper = SiteOper()
+        siteoper = get_chain_site_port()
         siteshelper = SitesHelper()
         siteinfo = siteoper.get_by_domain(domain)
         if not siteinfo:
@@ -677,7 +677,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
         """
         # 检查域名是否可用
         domain = site_rules.extract_domain(url)
-        siteoper = SiteOper()
+        siteoper = get_chain_site_port()
         site_info = siteoper.get_by_domain(domain)
         if not site_info:
             return False, f"站点【{url}】不存在"
@@ -756,7 +756,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
         return SiteInteractionHandler(
             messenger=self,
             cookie_updater=self.update_cookie,
-            repository=SiteOper(),
+            repository=get_chain_site_port(),
         )
 
     def remote_disable(self, arg_str: str, channel: NotificationChannel,
@@ -770,7 +770,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
         if not arg_str.isdigit():
             return
         site_id = int(arg_str)
-        siteoper = SiteOper()
+        siteoper = get_chain_site_port()
         site = siteoper.get(site_id)
         if not site:
             self.post_message(Message(
@@ -794,7 +794,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
         if not arg_str:
             return
         arg_strs = str(arg_str).split()
-        siteoper = SiteOper()
+        siteoper = get_chain_site_port()
         for arg_str in arg_strs:
             arg_str = arg_str.strip()
             if not arg_str.isdigit():
@@ -839,7 +839,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
             cookie, ua, msg = result
             if not cookie:
                 return False, msg
-            SiteOper().update(site_info.id, {
+            get_chain_site_port().update(site_info.id, {
                 "cookie": cookie,
                 "ua": ua
             })
@@ -887,7 +887,7 @@ class SiteChain(InteractionChainMixin, ChainBase):
         # 站点ID
         site_id = int(site_id)
         # 站点信息
-        site_info = SiteOper().get(site_id)
+        site_info = get_chain_site_port().get(site_id)
         if not site_info:
             self.post_message(Message(
                 channel=channel,
