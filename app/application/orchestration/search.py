@@ -11,7 +11,6 @@ from typing import List, Optional
 from unicodedata import normalize
 
 from app.runtime.execution import run_in_threadpool
-
 from app.application.orchestration import ChainBase
 from app.application.orchestration.media import MediaChain
 from app.runtime.config import global_vars, settings

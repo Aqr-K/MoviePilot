@@ -4,7 +4,6 @@ from threading import Lock
 from typing import Any, Iterable, List, Optional, Tuple, Union
 
 from app.runtime.execution import run_in_threadpool
-
 from app.schemas.event import MediaRecognizeConvertEventData as _SchemaMediaRecognizeConvertEventData
 from app.application.orchestration import ChainBase
 from app.application.orchestration.acoustid import AcoustIdChain

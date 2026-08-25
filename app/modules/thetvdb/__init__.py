@@ -1,8 +1,7 @@
 from threading import Lock
 from typing import Any, Optional, Tuple, Union
 
-from fastapi.concurrency import run_in_threadpool
-
+from app.runtime.execution import run_in_threadpool
 from app.runtime.config import settings
 from app.runtime.log import logger
 from app.modules import _ModuleBase

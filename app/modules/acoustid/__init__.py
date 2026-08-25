@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple, Union
 from uuid import UUID
 
-from fastapi.concurrency import run_in_threadpool
-
+from app.runtime.execution import run_in_threadpool
 from app.runtime.config import settings
 from app.runtime.log import logger
 from app.modules import _ModuleBase
