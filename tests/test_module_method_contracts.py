@@ -147,6 +147,36 @@ def test_bangumi_capabilities_share_aggregation_across_sync_async_entry() -> Non
         assert sync_contract.aggregation is ModuleResultAggregation.FIRST_NON_EMPTY
 
 
+def test_anilist_capabilities_share_aggregation_across_sync_async_entry() -> None:
+    """AniList 同步与异步能力必须共享列表合并或首个非空聚合语义。
+
+    anilist_info 不在列：已登记进 _SOURCE_PREFIXED_LEGACY_METHODS。
+    """
+    list_methods = (
+        "anilist_credits",
+        "anilist_discover",
+        "anilist_person_credits",
+        "anilist_popular_this_season",
+        "anilist_recommendations",
+        "anilist_trending",
+    )
+    value_methods = ("anilist_person_detail",)
+
+    for sync_method in list_methods:
+        async_method = f"async_{sync_method}"
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert sync_contract.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
+        assert sync_contract.result_shape is ModuleResultShape.LIST
+    for sync_method in value_methods:
+        async_method = f"async_{sync_method}"
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert sync_contract.aggregation is ModuleResultAggregation.FIRST_NON_EMPTY
+
+
 def test_high_frequency_capability_families_are_explicit() -> None:
     """媒体发现、识别、存储和消息族不能退回未分类 legacy 契约。"""
     expected_families = {
