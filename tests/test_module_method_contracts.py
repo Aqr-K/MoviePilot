@@ -86,6 +86,38 @@ def test_discovery_lists_share_aggregation_across_sync_async_entry() -> None:
         assert sync_contract.required_parameters
 
 
+def test_douban_capabilities_share_aggregation_across_sync_async_entry() -> None:
+    """Douban 同步与异步能力必须共享列表合并或首个非空聚合语义。
+
+    douban_info 不在列：该名已登记进 _SOURCE_PREFIXED_LEGACY_METHODS，
+    继续退回未分类 legacy 契约，见 test_source_prefixed_legacy_methods_stay_unclassified。
+    """
+    list_methods = (
+        "douban_discover",
+        "douban_movie_credits",
+        "douban_movie_recommend",
+        "douban_person_credits",
+        "douban_tv_credits",
+        "douban_tv_recommend",
+    )
+    value_methods = ("douban_person_detail",)
+
+    for sync_method in list_methods:
+        async_method = f"async_{sync_method}"
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert async_contract.required_parameters == sync_contract.required_parameters
+        assert sync_contract.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
+        assert sync_contract.result_shape is ModuleResultShape.LIST
+    for sync_method in value_methods:
+        async_method = f"async_{sync_method}"
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert sync_contract.aggregation is ModuleResultAggregation.FIRST_NON_EMPTY
+
+
 def test_high_frequency_capability_families_are_explicit() -> None:
     """媒体发现、识别、存储和消息族不能退回未分类 legacy 契约。"""
     expected_families = {
@@ -311,9 +343,17 @@ def test_lookup_contracts_separate_value_routes_from_list_aggregation() -> None:
 
 def test_source_prefixed_legacy_methods_stay_unclassified() -> None:
     """预留的单来源实现细节方法名不得获得独立族契约，保持 legacy 回退。"""
-    contract = get_module_method_contract("tvdb_slug")
-    assert contract.family == "legacy"
-    assert contract.aggregation is ModuleResultAggregation.LEGACY
+    for method in (
+        "tmdb_collection",
+        "async_tmdb_episodes",
+        "douban_info",
+        "bangumi_info",
+        "anilist_info",
+        "tvdb_slug",
+    ):
+        contract = get_module_method_contract(method)
+        assert contract.family == "legacy"
+        assert contract.aggregation is ModuleResultAggregation.LEGACY
 
 
 def test_heterogeneous_torrent_files_result_remains_legacy_compatible() -> None:
