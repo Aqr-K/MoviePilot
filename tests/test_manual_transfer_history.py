@@ -59,12 +59,12 @@ def _patch_transfer_planning(monkeypatch, chain, fileitem, history, planned, del
         delete=lambda history_id: deleted.append(("history", history_id)),
     )
     monkeypatch.setattr(
-        "app.application.orchestration.transfer.TransferHistoryOper",
+        "app.application.orchestration.transfer.get_chain_transfer_history_port",
         lambda: history_oper,
     )
-    monkeypatch.setattr("app.application.orchestration._transfer.TransferHistoryOper", lambda: history_oper)
+    monkeypatch.setattr("app.application.orchestration._transfer.get_chain_transfer_history_port", lambda: history_oper)
     monkeypatch.setattr(
-        "app.application.orchestration.transfer.DownloadHistoryOper",
+        "app.application.orchestration.transfer.get_chain_download_history_port",
         lambda: SimpleNamespace(
             get_by_hash=lambda download_hash: None,
             get_file_by_fullpath=lambda fullpath: None,
@@ -72,7 +72,7 @@ def _patch_transfer_planning(monkeypatch, chain, fileitem, history, planned, del
             get_by_path=lambda path: None,
         ),
     )
-    monkeypatch.setattr("app.application.orchestration._transfer.DownloadHistoryOper", lambda: SimpleNamespace(
+    monkeypatch.setattr("app.application.orchestration._transfer.get_chain_download_history_port", lambda: SimpleNamespace(
             get_by_hash=lambda download_hash: None,
             get_file_by_fullpath=lambda fullpath: None,
             get_files_by_savepath=lambda savepath: [],

@@ -132,7 +132,7 @@ class TestTransferFailedRetryButtons(unittest.TestCase):
 
         with patch.object(settings, "AI_AGENT_ENABLE", True):
             with patch(
-                "app.application.orchestration._transfer.TransferHistoryOper"
+                "app.application.orchestration._transfer.get_chain_transfer_history_port"
             ) as history_oper_cls, patch(
                 "app.application.orchestration._transfer.build_manual_redo_prompt",
                 return_value="retry transfer prompt",
@@ -208,7 +208,7 @@ class TestTransferFailedRetryButtons(unittest.TestCase):
         manager = SimpleNamespace(run_background_prompt=fake_run_background_prompt)
         with patch.object(settings, "AI_AGENT_ENABLE", True):
             with patch(
-                "app.application.orchestration._transfer.TransferHistoryOper"
+                "app.application.orchestration._transfer.get_chain_transfer_history_port"
             ) as history_oper_cls, patch(
                 "app.application.orchestration._transfer.build_manual_redo_prompt",
                 side_effect=build_manual_redo_prompt,
