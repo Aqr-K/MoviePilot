@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 from langchain_core.messages import BaseMessage, messages_from_dict, messages_to_dict
 
 from app.runtime.config import settings
-from app.application.agentdata import AgentChatPort as AgentChatOper
+from app.application.agentdata import get_agent_chat_port
 from app.runtime.log import logger
 from app.schemas.agent import ConversationMemory
 
@@ -80,9 +80,9 @@ class MemoryManager:
             return memory.messages
 
         try:
-            chat = AgentChatOper().get(session_id=session_id, user_id=user_id)
+            chat = get_agent_chat_port().get(session_id=session_id, user_id=user_id)
             if not chat:
-                chat = AgentChatOper().get(session_id=session_id)
+                chat = get_agent_chat_port().get(session_id=session_id)
         except Exception as e:
             logger.debug(f"读取持久化Agent会话失败: {e}")
             return []
@@ -116,9 +116,9 @@ class MemoryManager:
             return memory.messages
 
         try:
-            chat = await AgentChatOper().async_get(session_id=session_id, user_id=user_id)
+            chat = await get_agent_chat_port().async_get(session_id=session_id, user_id=user_id)
             if not chat:
-                chat = await AgentChatOper().async_get(session_id=session_id)
+                chat = await get_agent_chat_port().async_get(session_id=session_id)
         except Exception as e:
             logger.debug(f"读取持久化Agent会话失败: {e}")
             return []
@@ -155,7 +155,7 @@ class MemoryManager:
         # 更新内存缓存
         self.save_memory(memory)
         try:
-            AgentChatOper().save_agent_messages(
+            get_agent_chat_port().save_agent_messages(
                 session_id=session_id,
                 user_id=user_id,
                 messages=messages_to_dict(messages),
@@ -179,7 +179,7 @@ class MemoryManager:
         # 更新内存缓存
         self.save_memory(memory)
         try:
-            await AgentChatOper().async_save_agent_messages(
+            await get_agent_chat_port().async_save_agent_messages(
                 session_id=session_id,
                 user_id=user_id,
                 messages=messages_to_dict(messages),

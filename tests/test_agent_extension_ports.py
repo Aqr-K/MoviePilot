@@ -84,7 +84,7 @@ def test_run_workflow_tool_consumes_registered_workflow_execution_port():
     workflow_execution_port.register(lambda: provider)
 
     with patch(
-        "app.agent.tools.impl.run_workflow.WorkflowOper",
+        "app.agent.tools.impl.run_workflow.get_agent_workflow_port",
         return_value=workflow_oper,
     ):
         result = asyncio.run(tool.run(workflow_id=1, from_begin=True))
@@ -103,7 +103,7 @@ def test_run_workflow_tool_reports_error_from_registered_provider():
     workflow_execution_port.register(lambda: provider)
 
     with patch(
-        "app.agent.tools.impl.run_workflow.WorkflowOper",
+        "app.agent.tools.impl.run_workflow.get_agent_workflow_port",
         return_value=workflow_oper,
     ):
         result = asyncio.run(tool.run(workflow_id=2, from_begin=False))

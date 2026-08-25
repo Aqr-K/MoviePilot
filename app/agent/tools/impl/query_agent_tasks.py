@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.runtime.config import settings
-from app.application.agentdata import AgentTaskPort as AgentTaskOper
+from app.application.agentdata import get_agent_task_port
 
 
 class QueryAgentTasksInput(BaseModel):
@@ -50,7 +50,7 @@ class QueryAgentTasksTool(MoviePilotTool):
         """读取当前用户的任务及运行时下一次触发时间。"""
         from app.application.scheduling import get_agent_task_next_run
 
-        oper = AgentTaskOper()
+        oper = get_agent_task_port()
         if task_id:
             task = oper.get(task_id=task_id, user_id=str(self._user_id))
             tasks = [task] if task else []

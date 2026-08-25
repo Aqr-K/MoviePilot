@@ -77,9 +77,9 @@ from app.application.plugin.runtime import get_plugin_manager
 def _get_plugin_tools_revision() -> int:
     """读取插件工具目录修订号，避免 Agent 编排依赖具体管理器类型。"""
     return get_plugin_manager().get_plugin_agent_tools_revision()
-from app.application.agentdata import AgentChatPort as AgentChatOper
-from app.application.agentdata import AgentTaskPort as AgentTaskOper
-from app.application.agentdata import UserPort as UserOper
+from app.application.agentdata import get_agent_chat_port
+from app.application.agentdata import get_agent_task_port
+from app.application.agentdata import get_agent_user_port
 from app.runtime.log import logger
 from app.schemas.event import AgentLLMProviderEventData
 from app.schemas.event import AgentTokensUsageEventData
@@ -476,7 +476,7 @@ class MoviePilotAgent:
         if not messages or not self._should_save_display_history():
             return
         try:
-            await AgentChatOper().async_append_display_messages(
+            await get_agent_chat_port().async_append_display_messages(
                 session_id=self.session_id,
                 user_id=self.user_id,
                 username=self.username,
@@ -574,16 +574,16 @@ class MoviePilotAgent:
             return
         self._tool_context["chat_title_prepared"] = True
         try:
-            chat = await AgentChatOper().async_get(
+            chat = await get_agent_chat_port().async_get(
                 session_id=self.session_id,
                 user_id=self.user_id,
             )
-            if chat and AgentChatOper.has_custom_title(chat.title):
+            if chat and get_agent_chat_port().has_custom_title(chat.title):
                 return
             title = await self._generate_chat_title(message)
             if not title:
                 return
-            await AgentChatOper().async_update_title_if_empty(
+            await get_agent_chat_port().async_update_title_if_empty(
                 session_id=self.session_id,
                 user_id=self.user_id,
                 title=title,
@@ -970,7 +970,7 @@ class MoviePilotAgent:
         if not self.username:
             return False
         try:
-            user = await UserOper().async_get_by_name(self.username)
+            user = await get_agent_user_port().async_get_by_name(self.username)
         except Exception as e:
             logger.error(f"检查 Agent 用户管理员身份失败: {e}")
             return False
@@ -3405,7 +3405,7 @@ class AgentManager:
         """
         if not settings.AI_AGENT_ENABLE:
             return False, "AI Agent 未启用"
-        oper = AgentTaskOper()
+        oper = get_agent_task_port()
         task = oper.get(task_id)
         if not task or not task.enabled:
             return False, "Agent 定时任务不存在或已停用"

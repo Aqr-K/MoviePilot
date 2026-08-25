@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from app.agent.tools.base import MoviePilotTool
 from app.agent.tools.tags import ToolTag
 from app.runtime.hostports.workflows import workflow_execution_port
-from app.application.agentdata import WorkflowPort as WorkflowOper
+from app.application.agentdata import get_agent_workflow_port
 from app.runtime.log import logger
 
 
@@ -64,7 +64,7 @@ class RunWorkflowTool(MoviePilotTool):
         )
 
         try:
-            workflow_oper = WorkflowOper()
+            workflow_oper = get_agent_workflow_port()
             workflow = await workflow_oper.async_get(workflow_id)
 
             if not workflow:
