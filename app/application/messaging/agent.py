@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -11,6 +12,10 @@ from app.runtime.channels import (  # noqa: F401  渠道管理员判定的对外
     register_channel_admin_resolver,
     resolve_config_principal_ids,
 )
+from app.runtime.log import logger
+from app.schemas.message import Message
+from app.schemas.notification import channel_identity
+from app.schemas.types import NotificationChannel
 
 # Agent 选择按钮回调前缀（新旧两种格式都必须继续兼容）
 AGENT_CHOICE_PREFIX = "agent_interaction:choice:"
@@ -180,6 +185,8 @@ agent_interaction_manager = AgentInteractionManager()
 
 _WEB_AGENT_EDIT_QUEUES: dict[str, list[Queue[dict]]] = {}
 _WEB_AGENT_EDIT_LOCK = Lock()
+_WEB_AGENT_MESSAGE_QUEUES: dict[str, list[Queue[Message]]] = {}
+_WEB_AGENT_MESSAGE_LOCK = Lock()
 
 # Web Agent 请求处理完成后仍需继续落库的后台任务（如展示消息快照）；
 # 登记在此才能在应用关闭时统一收口，避免数据库连接关闭前留下悬空任务。
@@ -295,6 +302,104 @@ def build_web_agent_message_update_event(
         "type": "message_update",
         "target_message": target_message,
     }
+
+
+def extract_web_agent_message_from_event_data(data: dict) -> Optional[Message]:
+    """
+    从 NoticeMessage 事件数据中提取 WebAgent 通知。
+
+    :param data: NoticeMessage 事件数据，兼容扁平字段和 message 包装格式
+    :return: WebAgent 通知，不属于 WebAgent 或数据无效时返回 None
+    """
+    if not isinstance(data, dict):
+        return None
+
+    try:
+        message = data.get("message")
+        if isinstance(message, Message):
+            message = message
+        elif isinstance(message, dict):
+            message_data = copy.deepcopy(message)
+            message_data.pop("type", None)
+            message = Message(**message_data)
+        else:
+            message_data = copy.deepcopy(data)
+            message_data.pop("type", None)
+            message_data.pop("current_time", None)
+            message = Message(**message_data)
+    except Exception as err:
+        logger.debug(f"解析WebAgent通知事件失败: {err}")
+        return None
+
+    if channel_identity(message.channel) != NotificationChannel.WebAgent.value:
+        return None
+    return message
+
+
+def is_web_agent_message_for_user(message: Message, user_id: str) -> bool:
+    """
+    判断 NoticeMessage 事件是否属于当前 WebAgent 用户。
+
+    :param message: NoticeMessage 中的通知消息
+    :param user_id: 当前登录用户 ID
+    :return: 可被本次 WebAgent 请求消费时返回 True
+    """
+    try:
+        target_user = message.userid
+        return target_user is None or str(target_user) == str(user_id)
+    except Exception:
+        return False
+
+
+def _get_web_agent_message_user_id(message: Message) -> Optional[str]:
+    """返回 WebAgent 通知的目标用户 ID，无目标时返回 None。"""
+    try:
+        if channel_identity(message.channel) != NotificationChannel.WebAgent.value:
+            return None
+        user_id = message.userid
+        return str(user_id) if user_id is not None else None
+    except Exception:
+        return None
+
+
+def dispatch_web_agent_message_event(event: object) -> None:
+    """将 WebAgent NoticeMessage 分发给正在等待的请求队列。"""
+    event_data = getattr(event, "event_data", None)
+    data = event_data if isinstance(event_data, dict) else {}
+    message = extract_web_agent_message_from_event_data(data)
+    if not message:
+        return
+    with _WEB_AGENT_MESSAGE_LOCK:
+        user_id = _get_web_agent_message_user_id(message)
+        if user_id is None:
+            queues = [
+                message_queue
+                for user_queues in _WEB_AGENT_MESSAGE_QUEUES.values()
+                for message_queue in user_queues
+            ]
+        else:
+            queues = list(_WEB_AGENT_MESSAGE_QUEUES.get(user_id) or [])
+    for message_queue in queues:
+        message_queue.put(message)
+
+
+def attach_web_agent_message_queue(user_id: str, message_queue: Queue[Message]) -> None:
+    """为当前 WebAgent 请求挂载通知收集队列。"""
+    with _WEB_AGENT_MESSAGE_LOCK:
+        _WEB_AGENT_MESSAGE_QUEUES.setdefault(str(user_id), []).append(message_queue)
+
+
+def detach_web_agent_message_queue(user_id: str, message_queue: Queue[Message]) -> None:
+    """移除当前 WebAgent 请求的通知收集队列。"""
+    with _WEB_AGENT_MESSAGE_LOCK:
+        queues = _WEB_AGENT_MESSAGE_QUEUES.get(str(user_id))
+        if not queues:
+            return
+        _WEB_AGENT_MESSAGE_QUEUES[str(user_id)] = [
+            item for item in queues if item is not message_queue
+        ]
+        if not _WEB_AGENT_MESSAGE_QUEUES[str(user_id)]:
+            _WEB_AGENT_MESSAGE_QUEUES.pop(str(user_id), None)
 
 
 def attach_web_agent_edit_queue(user_id: str, edit_queue: Queue[dict]) -> None:

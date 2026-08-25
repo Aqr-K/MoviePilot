@@ -29,7 +29,10 @@ from app.adapters.system.resource import (
     ResourceHelper,
     configure_resource_version_provider,
 )
-from app.application.messaging.agent import shutdown_web_agent_background_tasks
+from app.application.messaging.agent import (
+    dispatch_web_agent_message_event,
+    shutdown_web_agent_background_tasks,
+)
 from app.application.messaging.message import (
     MessageHelper,
     MessageQueueManager,
@@ -60,7 +63,7 @@ from app.db.uow import SqlAlchemyAsyncUnitOfWork
 from app.application.messaging.gateway import CommandChain
 from app.schemas.message import Message
 from app.schemas.message import MessageType
-from app.schemas.types import SystemConfigKey
+from app.schemas.types import EventType, SystemConfigKey
 from app.startup.agent_initializer import init_agent, stop_agent
 from app.startup.bindings.database import build_database_governance
 from app.startup.managed_resources_initializer import (
@@ -434,6 +437,11 @@ async def init_modules() -> HostRuntime:
     user_auth()
     # 事件错误通知由启动组合层接入消息服务。
     EventManager().set_error_notifier(notify_event_error)
+    # WebAgent 事件监听由组合根统一装配，HTTP 请求只管理自己的队列。
+    EventManager().add_event_listener(
+        EventType.NoticeMessage,
+        dispatch_web_agent_message_event,
+    )
     # 宿主类处理器在启动层显式登记，事件总线不再兜底 owner_class()。
     configure_host_event_handler_resolver()
     # 加载模块
