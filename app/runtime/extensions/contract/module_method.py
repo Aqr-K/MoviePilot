@@ -287,9 +287,21 @@ _METHOD_CONTRACTS = {
         result_contract="MediaInfo | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
         required_parameters=("meta", "mtype", "media_source", "media_id", "episode_group", "cache"),
     ),
+    "async_recognize_media": ModuleMethodContract(
+        family="media-recognition", input_contract="MediaRecognitionRequest",
+        result_contract="MediaInfo | None", aggregation=ModuleResultAggregation.FIRST_NON_EMPTY,
+        required_parameters=("meta", "mtype", "media_source", "media_id", "episode_group", "cache"),
+    ),
     "search_medias": ModuleMethodContract(
         family="media-recognition", input_contract="MediaSearchRequest",
-        result_contract="list[MediaInfo]", aggregation=ModuleResultAggregation.ORDERED_LIST_MERGE,
+        result_contract="list[MediaInfo]", result_shape=ModuleResultShape.LIST,
+        aggregation=ModuleResultAggregation.ORDERED_LIST_MERGE,
+        required_parameters=("meta", "media_source"),
+    ),
+    "async_search_medias": ModuleMethodContract(
+        family="media-recognition", input_contract="MediaSearchRequest",
+        result_contract="list[MediaInfo]", result_shape=ModuleResultShape.LIST,
+        aggregation=ModuleResultAggregation.ORDERED_LIST_MERGE,
         required_parameters=("meta", "media_source"),
     ),
     "obtain_images": ModuleMethodContract(

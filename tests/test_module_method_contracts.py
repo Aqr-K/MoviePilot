@@ -43,6 +43,21 @@ def test_pipeline_methods_declare_pipeline_aggregation() -> None:
         assert contract.aggregation is ModuleResultAggregation.PIPELINE
 
 
+def test_recognize_and_search_share_aggregation_across_sync_async_entry() -> None:
+    """识别与搜索能力的同步、异步入口必须共享相同的聚合语义、必填参数与结果形状。"""
+    for sync_method, async_method in (
+        ("recognize_media", "async_recognize_media"),
+        ("search_medias", "async_search_medias"),
+    ):
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert async_contract.required_parameters == sync_contract.required_parameters
+        assert async_contract.result_shape is sync_contract.result_shape
+
+    assert get_module_method_contract("search_medias").result_shape is ModuleResultShape.LIST
+
+
 def test_high_frequency_capability_families_are_explicit() -> None:
     """媒体发现、识别、存储和消息族不能退回未分类 legacy 契约。"""
     expected_families = {
