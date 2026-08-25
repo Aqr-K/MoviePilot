@@ -213,6 +213,13 @@ async def shutdown_web_agent_background_tasks() -> None:
         await asyncio.wait(tasks)
 
 
+async def wait_web_agent_background_tasks() -> None:
+    """等待已登记的 Web Agent 任务完成最终收尾。"""
+    tasks = tuple(_WEB_AGENT_BACKGROUND_TASKS)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 def normalize_web_agent_button_rows(buttons: Optional[list[list[dict]]]) -> list[list[dict]]:
     """
     将消息按钮转换为 WebAgent 前端可识别的按钮行。
