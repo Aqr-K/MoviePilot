@@ -754,6 +754,7 @@ def test_browser_sessions_close_before_managed_resources(monkeypatch) -> None:
 
 def test_module_shutdown_waits_for_image_proxy_log_coalescer(monkeypatch) -> None:
     """模块关闭必须等待图片安全日志的在途聚合任务收口。"""
+    monkeypatch.setattr(modules_initializer, "stop_agent", AsyncMock())
     dependencies = _patch_module_shutdown_dependencies(monkeypatch)
 
     asyncio.run(modules_initializer.stop_modules())
