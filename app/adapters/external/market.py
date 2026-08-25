@@ -2081,6 +2081,8 @@ class PluginHelper(metaclass=WeakSingleton):
             return False, dep_msg
 
         self.refresh_persistent_plugin_backup(pid)
+        if backup_dir:
+            shutil.rmtree(backup_dir, ignore_errors=True)
         return True, ""
 
     @staticmethod
