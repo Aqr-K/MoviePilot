@@ -11,7 +11,7 @@ from typing import Optional
 from apscheduler.jobstores.base import JobLookupError
 
 from app.application.orchestration.scheduler import SchedulerChain
-from app.application.plugin.runtime import get_plugin_manager as PluginManager
+from app.application.plugin.runtime import get_plugin_manager
 from app.runtime.events import Event, eventmanager
 from app.runtime.extensions.contract.instance import matches_extension, split_instance_key
 from app.runtime.log import logger, wrap_for_plugin_instance
@@ -25,7 +25,7 @@ class PluginScheduling:
         """
         初始化插件定时服务
         """
-        for pid in PluginManager().get_running_plugin_ids():
+        for pid in get_plugin_manager().get_running_plugin_ids():
             self.update_plugin_job(pid)
 
     @eventmanager.register(EventType.PluginReload)
@@ -62,7 +62,7 @@ class PluginScheduling:
                     self._jobs.pop(job_id, None)
             if not jobs_to_remove:
                 return
-            plugin_name = PluginManager().get_plugin_attr(pid, "plugin_name")
+            plugin_name = get_plugin_manager().get_plugin_attr(pid, "plugin_name")
             # 遍历移除任务
             for job_id, service in jobs_to_remove:
                 try:
@@ -99,7 +99,7 @@ class PluginScheduling:
         self.remove_plugin_job(pid)
         # 获取插件服务列表
         with self._lock:
-            plugin_manager = PluginManager()
+            plugin_manager = get_plugin_manager()
             try:
                 plugin_services = plugin_manager.get_plugin_services(pid=pid)
             except Exception as e:

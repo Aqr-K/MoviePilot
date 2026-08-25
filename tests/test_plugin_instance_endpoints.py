@@ -28,7 +28,7 @@ def test_list_plugin_instances_returns_manager_result():
         {"instance_id": "default", "instance_key": "DemoPlugin", "running": True, "state": True}
     ]
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         result = list_plugin_instances("DemoPlugin", None)
 
     assert result == plugin_manager.list_plugin_instances.return_value
@@ -40,7 +40,7 @@ def test_list_plugin_instances_maps_unknown_plugin_to_404():
     plugin_manager = MagicMock()
     plugin_manager.list_plugin_instances.side_effect = LookupError("插件 DemoPlugin 不存在")
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             list_plugin_instances("DemoPlugin", None)
 
@@ -54,7 +54,7 @@ def test_create_plugin_instance_rebuilds_registrations_on_success():
     plugin_manager.create_plugin_instance.return_value = info
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         result = create_plugin_instance(
             "DemoPlugin", PluginInstanceCreate(instance_id="second", config={"enable": True}), None
@@ -71,7 +71,7 @@ def test_create_plugin_instance_maps_unknown_plugin_to_404_without_rebuild():
     plugin_manager.create_plugin_instance.side_effect = LookupError("插件 DemoPlugin 不存在")
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         with pytest.raises(HTTPException) as exc_info:
             create_plugin_instance("DemoPlugin", PluginInstanceCreate(instance_id="second"), None)
@@ -86,7 +86,7 @@ def test_create_plugin_instance_maps_invalid_instance_id_to_400_without_rebuild(
     plugin_manager.create_plugin_instance.side_effect = ValueError("非法的插件实例ID：'../../etc'")
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         with pytest.raises(HTTPException) as exc_info:
             create_plugin_instance("DemoPlugin", PluginInstanceCreate(instance_id="../../etc"), None)
@@ -100,7 +100,7 @@ def test_delete_plugin_instance_rebuilds_registrations_on_success():
     plugin_manager = MagicMock()
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         result = delete_plugin_instance("DemoPlugin", "second", None)
 
@@ -115,7 +115,7 @@ def test_delete_plugin_instance_maps_default_instance_rejection_to_400():
     plugin_manager.delete_plugin_instance.side_effect = ValueError("默认实例不可删除")
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         with pytest.raises(HTTPException) as exc_info:
             delete_plugin_instance("DemoPlugin", "default", None)
@@ -130,7 +130,7 @@ def test_delete_plugin_instance_maps_unknown_instance_to_404():
     plugin_manager.delete_plugin_instance.side_effect = LookupError("插件实例不存在")
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         with pytest.raises(HTTPException) as exc_info:
             delete_plugin_instance("DemoPlugin", "ghost", None)
@@ -149,7 +149,7 @@ def test_list_plugin_versions_returns_manager_overview():
         "instances": [],
     }
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         result = list_plugin_versions("DemoPlugin", None)
 
     assert result == plugin_manager.list_plugin_versions.return_value
@@ -161,7 +161,7 @@ def test_list_plugin_versions_maps_unknown_plugin_to_404():
     plugin_manager = MagicMock()
     plugin_manager.list_plugin_versions.side_effect = LookupError("插件 DemoPlugin 不存在")
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             list_plugin_versions("DemoPlugin", None)
 
@@ -182,7 +182,7 @@ def test_set_plugin_instance_version_rebuilds_registrations_on_success():
     plugin_manager.set_plugin_instance_version.return_value = binding
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         result = set_plugin_instance_version(
             "DemoPlugin",
@@ -203,7 +203,7 @@ def test_set_plugin_instance_version_defaults_to_following_the_default_instance(
     plugin_manager = MagicMock()
     plugin_manager.set_plugin_instance_version.return_value = {}
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin"):
         set_plugin_instance_version("DemoPlugin", "second", PluginInstanceVersionSet(), None)
 
@@ -218,7 +218,7 @@ def test_set_plugin_instance_version_maps_unknown_instance_to_404_without_rebuil
     plugin_manager.set_plugin_instance_version.side_effect = LookupError("插件实例不存在")
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         with pytest.raises(HTTPException) as exc_info:
             set_plugin_instance_version(
@@ -237,7 +237,7 @@ def test_set_plugin_instance_version_maps_uninstalled_version_to_400_without_reb
     )
     registered = []
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.register_plugin", side_effect=registered.append):
         with pytest.raises(HTTPException) as exc_info:
             set_plugin_instance_version(
@@ -258,7 +258,7 @@ def test_recycle_plugin_versions_returns_the_manager_outcome():
         "DemoPlugin": {"removed": ["1.0.0"], "kept": {"2.0.0": "当前安装版本"}}
     }
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         result = recycle_plugin_versions("DemoPlugin", None)
 
     assert result == {
@@ -274,7 +274,7 @@ def test_recycle_plugin_versions_maps_unknown_plugin_to_404():
     plugin_manager = MagicMock()
     plugin_manager.recycle_plugin_versions.side_effect = LookupError("插件 DemoPlugin 不存在")
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             recycle_plugin_versions("DemoPlugin", None)
 

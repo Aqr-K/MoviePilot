@@ -163,7 +163,7 @@ def invoking_plugin(monkeypatch) -> Any:
     """
     Singleton._instances.pop((PluginManager, (), frozenset()), None)
     manager = PluginManager()
-    monkeypatch.setattr(invoke_plugin_module, "PluginManager", lambda: manager)
+    monkeypatch.setattr(invoke_plugin_module, "get_plugin_manager", lambda: manager)
 
     def install(requirement):
         plugin = _InvokingPlugin(requirement)

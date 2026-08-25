@@ -185,7 +185,7 @@ def test_invoke_plugin_action_calls_default_target_instance(
     plugin_manager, instance_targets, monkeypatch
 ):
     """工作流动作按插件ID调用时命中默认分身，验证经由公开端口的完整链路。"""
-    monkeypatch.setattr(invoke_plugin_module, "PluginManager", lambda: plugin_manager)
+    monkeypatch.setattr(invoke_plugin_module, "get_plugin_manager", lambda: plugin_manager)
     plugin_manager.running_plugins["Demo@zzz"] = _ActionInstancePlugin("Demo@zzz")
     plugin_manager.running_plugins["Demo@alt"] = _ActionInstancePlugin("Demo@alt")
     instance_targets("Demo", [_target("zzz"), _target("alt", default=True)])
@@ -209,7 +209,7 @@ def test_invoke_plugin_action_raises_lookup_error_instead_of_swallowing_it(
     早前实现在此处有一层 ``except Exception`` 只记服务端日志、对调用方返回
     未变化的 context，调用方与用户都看不出这次调用其实没有执行。
     """
-    monkeypatch.setattr(invoke_plugin_module, "PluginManager", lambda: plugin_manager)
+    monkeypatch.setattr(invoke_plugin_module, "get_plugin_manager", lambda: plugin_manager)
     plugin_manager.running_plugins["Demo@zzz"] = _ActionInstancePlugin("Demo@zzz")
     plugin_manager.running_plugins["Demo@alt"] = _ActionInstancePlugin("Demo@alt")
     instance_targets("Demo", [_target("zzz"), _target("alt")])
@@ -227,7 +227,7 @@ def test_invoke_plugin_action_raises_lookup_error_instead_of_swallowing_it(
 
 def test_invoke_plugin_action_works_for_single_instance(monkeypatch, plugin_manager):
     """单分身插件按插件ID调用照常工作。"""
-    monkeypatch.setattr(invoke_plugin_module, "PluginManager", lambda: plugin_manager)
+    monkeypatch.setattr(invoke_plugin_module, "get_plugin_manager", lambda: plugin_manager)
     plugin_manager.running_plugins["Demo"] = _ActionInstancePlugin("Demo")
 
     action = InvokePluginAction("node-1")
@@ -255,7 +255,7 @@ def test_workflow_manager_surfaces_invoke_plugin_failure_as_visible_message(
     异常不会在工作流引擎这一层被静默吞掉，而是变成 `ActionResult.success=False`
     且 `message` 携带可读原因。
     """
-    monkeypatch.setattr(invoke_plugin_module, "PluginManager", lambda: plugin_manager)
+    monkeypatch.setattr(invoke_plugin_module, "get_plugin_manager", lambda: plugin_manager)
     monkeypatch.setattr(
         "app.workflow.global_vars.is_workflow_stopped", lambda workflow_id: False
     )

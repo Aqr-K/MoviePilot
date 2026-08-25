@@ -21,7 +21,7 @@ from app.api.principal import ApiPrincipal
 from app.api.response import ResponseAPIRouter
 from app.api.service_secrets import mask_secret_values, restore_masked_secrets
 from app.application.configuration import get_configured_system_config
-from app.application.plugin.runtime import get_plugin_manager as PluginManager
+from app.application.plugin.runtime import get_plugin_manager
 from app.application.service_config import get_configured_service_instance_configs
 from app.db.models.serviceconfig import BUILTIN_PROVIDER
 from app.db.oper.serviceconfig import ServiceConfigNameConflictError
@@ -220,7 +220,7 @@ def _absent_provider_reason(provider: str, installed: Set[str]) -> str:
     """
     if extension_id_of(provider) not in installed:
         return PROVIDER_NOT_INSTALLED
-    if not PluginManager().get_plugin_state(provider):
+    if not get_plugin_manager().get_plugin_state(provider):
         return PROVIDER_DISABLED
     return PROVIDER_START_FAILED
 

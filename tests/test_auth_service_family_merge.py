@@ -462,7 +462,7 @@ def test_login_page_lists_entries_without_leaking_config_payload(monkeypatch) ->
             """返回插件登录入口列表。"""
             return PluginProjection({"EmbySsoPlugin": _AuthPlugin()}).auth_providers()
 
-    monkeypatch.setattr("app.api.endpoints.auth.PluginManager", _Manager)
+    monkeypatch.setattr("app.api.endpoints.auth.get_plugin_manager", _Manager)
 
     providers = auth_providers_endpoint(service=_StubAuthService())
     rendered = [AuthProviderInfo(**provider).model_dump() for provider in providers]

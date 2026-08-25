@@ -58,11 +58,11 @@ from app.application.security.identity import UserIdentityService
 from app.adapters.external.server import MoviePilotServerHelper
 from app.api.data import get_api_data_ports, get_async_db, get_db
 from app.runtime.events import eventmanager
-from app.application.plugin.runtime import get_plugin_manager as PluginManager
+from app.application.plugin.runtime import get_plugin_manager
 from app.runtime.log import logger
 from app.schemas.event import PluginDataResetEventData
 from app.schemas.types import ChainEventType, EventType
-from app.application.scheduling import Scheduler, start_scheduler_job
+from app.application.scheduling import get_scheduler, start_scheduler_job
 from app.application.site.sites import SitesHelper  # pylint: disable=import-error,no-name-in-module
 from app.domain import site as site_rules
 from app.foundation import url as url_tools
@@ -303,7 +303,7 @@ def get_workflow_mutation_command(
         db: Session = Depends(get_db),
 ) -> WorkflowMutationCommand:
     """组装请求级工作流写用例和提交后的调度副作用。"""
-    scheduler = Scheduler()
+    scheduler = get_scheduler()
     workflow_manager = get_workflow_manager()
     return WorkflowMutationCommand(
         repository=_repository("workflow", db),
@@ -427,7 +427,7 @@ def get_transfer_history_mutation_command(
 
 def get_plugin_config_command() -> PluginConfigCommand:
     """组装插件配置更新与重置用例，隔离 API 对运行时写操作的编排。"""
-    manager = PluginManager()
+    manager = get_plugin_manager()
 
     def publish_reset(plugin_id: str) -> None:
         """在清理持久化数据前通知目标插件执行补偿。"""

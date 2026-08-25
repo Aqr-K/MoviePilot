@@ -220,7 +220,7 @@ def test_plugin_static_file_requires_resource_token_by_default(monkeypatch):
             """返回插件认证入口列表。"""
             return []
 
-    monkeypatch.setattr(plugin_endpoint, "PluginManager", FakePluginManager)
+    monkeypatch.setattr(plugin_endpoint, "get_plugin_manager", FakePluginManager)
     monkeypatch.setattr(plugin_endpoint, "verify_resource_token", lambda token: calls.append(token))
 
     plugin_endpoint._verify_plugin_static_file_access(
@@ -250,7 +250,7 @@ def test_plugin_auth_remote_files_allow_anonymous_bootstrap(monkeypatch):
                 }
             ]
 
-    monkeypatch.setattr(plugin_endpoint, "PluginManager", FakePluginManager)
+    monkeypatch.setattr(plugin_endpoint, "get_plugin_manager", FakePluginManager)
     monkeypatch.setattr(plugin_endpoint, "verify_resource_token", lambda token: calls.append(token))
 
     plugin_endpoint._verify_plugin_static_file_access(
@@ -294,7 +294,7 @@ def test_plugin_auth_remote_files_allow_anonymous_bootstrap_for_non_default_inst
                 }
             ]
 
-    monkeypatch.setattr(plugin_endpoint, "PluginManager", FakePluginManager)
+    monkeypatch.setattr(plugin_endpoint, "get_plugin_manager", FakePluginManager)
     monkeypatch.setattr(plugin_endpoint, "verify_resource_token", lambda token: calls.append(token))
 
     plugin_endpoint._verify_plugin_static_file_access(
@@ -325,7 +325,7 @@ def test_plugin_auth_remote_files_do_not_loosen_access_for_a_different_plugin(
                 }
             ]
 
-    monkeypatch.setattr(plugin_endpoint, "PluginManager", FakePluginManager)
+    monkeypatch.setattr(plugin_endpoint, "get_plugin_manager", FakePluginManager)
     monkeypatch.setattr(plugin_endpoint, "verify_resource_token", lambda token: calls.append(token))
 
     plugin_endpoint._verify_plugin_static_file_access(

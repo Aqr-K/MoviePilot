@@ -36,7 +36,7 @@ def test_plugin_instance_log_levels_returns_configured_and_effective():
     plugin_manager = _plugin_manager_with_instances(["default", "second"])
     expires_at = datetime(2030, 1, 1)
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch(
                 "app.api.endpoints.plugin.get_plugin_instance_log_level_override",
                 side_effect=lambda pid, iid: ("DEBUG", expires_at) if iid == "second" else None,
@@ -60,7 +60,7 @@ def test_plugin_instance_log_levels_maps_unknown_plugin_to_404():
     plugin_manager = MagicMock()
     plugin_manager.list_plugin_instances.side_effect = LookupError("插件 DemoPlugin 不存在")
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             plugin_instance_log_levels("DemoPlugin", None)
 
@@ -77,7 +77,7 @@ def test_set_plugin_instance_log_level_api_persists_and_activates():
     plugin_manager = _plugin_manager_with_instances(["second"])
     config_oper = MagicMock()
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.PluginConfigOper", return_value=config_oper), \
             patch("app.api.endpoints.plugin.set_plugin_instance_log_level") as set_level:
         result = set_plugin_instance_log_level_api(
@@ -96,7 +96,7 @@ def test_set_plugin_instance_log_level_api_rejects_invalid_level_with_400():
     plugin_manager = _plugin_manager_with_instances(["second"])
     config_oper = MagicMock()
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.PluginConfigOper", return_value=config_oper), \
             patch("app.api.endpoints.plugin.set_plugin_instance_log_level") as set_level:
         with pytest.raises(HTTPException) as exc_info:
@@ -114,7 +114,7 @@ def test_set_plugin_instance_log_level_api_maps_unknown_plugin_to_404():
     plugin_manager = MagicMock()
     plugin_manager.list_plugin_instances.side_effect = LookupError("插件 DemoPlugin 不存在")
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             set_plugin_instance_log_level_api(
                 "DemoPlugin", "second", PluginInstanceLogLevelSet(level="DEBUG"), None
@@ -127,7 +127,7 @@ def test_set_plugin_instance_log_level_api_maps_unknown_instance_to_404():
     """实例标识未登记时设置端点返回 404。"""
     plugin_manager = _plugin_manager_with_instances(["default"])
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             set_plugin_instance_log_level_api(
                 "DemoPlugin", "ghost", PluginInstanceLogLevelSet(level="DEBUG"), None
@@ -146,7 +146,7 @@ def test_clear_plugin_instance_log_level_api_persists_and_deactivates():
     plugin_manager = _plugin_manager_with_instances(["second"])
     config_oper = MagicMock()
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.PluginConfigOper", return_value=config_oper), \
             patch("app.api.endpoints.plugin.clear_plugin_instance_log_level") as clear_level:
         result = clear_plugin_instance_log_level_api("DemoPlugin", "second", None)
@@ -162,7 +162,7 @@ def test_clear_plugin_instance_log_level_api_maps_unknown_instance_to_404():
     """实例标识未登记时清除端点返回 404。"""
     plugin_manager = _plugin_manager_with_instances(["default"])
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             clear_plugin_instance_log_level_api("DemoPlugin", "ghost", None)
 
@@ -183,7 +183,7 @@ def test_plugin_instance_log_files_lists_directory_sorted_by_mtime(tmp_path):
     time.sleep(0.01)
     newer.write_text("current content", encoding="utf-8")
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.get_plugin_instance_log_dir", return_value=tmp_path):
         result = plugin_instance_log_files("DemoPlugin", "second", None)
 
@@ -196,7 +196,7 @@ def test_plugin_instance_log_files_returns_empty_list_when_dir_missing(tmp_path)
     plugin_manager = _plugin_manager_with_instances(["second"])
     missing_dir = tmp_path / "does-not-exist"
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager), \
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager), \
             patch("app.api.endpoints.plugin.get_plugin_instance_log_dir", return_value=missing_dir):
         result = plugin_instance_log_files("DemoPlugin", "second", None)
 
@@ -208,7 +208,7 @@ def test_plugin_instance_log_files_maps_unknown_plugin_to_404():
     plugin_manager = MagicMock()
     plugin_manager.list_plugin_instances.side_effect = LookupError("插件 DemoPlugin 不存在")
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             plugin_instance_log_files("DemoPlugin", "second", None)
 
@@ -219,7 +219,7 @@ def test_plugin_instance_log_files_maps_unknown_instance_to_404():
     """实例标识未登记时日志文件列表端点返回 404。"""
     plugin_manager = _plugin_manager_with_instances(["default"])
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         with pytest.raises(HTTPException) as exc_info:
             plugin_instance_log_files("DemoPlugin", "ghost", None)
 

@@ -722,7 +722,7 @@ async def test_dashboard_schedule_keeps_agent_tasks(monkeypatch) -> None:
         )
     ]
     monkeypatch.setattr(
-        "app.api.endpoints.dashboard.Scheduler",
+        "app.api.endpoints.dashboard.get_scheduler",
         lambda: SimpleNamespace(list=lambda: scheduler_items),
     )
 

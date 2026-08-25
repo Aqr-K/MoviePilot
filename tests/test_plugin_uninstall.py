@@ -221,7 +221,7 @@ def test_uninstall_plugin_endpoint_maps_unknown_plugin_to_404():
     manager.uninstall_plugin.side_effect = LookupError("插件 DemoPlugin 不存在")
 
     with (
-        patch("app.api.endpoints.plugin.PluginManager", return_value=manager),
+        patch("app.api.endpoints.plugin.get_plugin_manager", return_value=manager),
         patch("app.api.endpoints.plugin.remove_plugin_api") as remove_api,
         patch("app.api.endpoints.plugin.remove_plugin_job") as remove_job,
         patch("app.api.endpoints.plugin.remove_plugin_from_folders") as remove_folders,
@@ -243,7 +243,7 @@ def test_uninstall_plugin_endpoint_deregisters_after_manager_succeeds():
     config_oper.get.return_value = ["DemoPlugin", "OtherPlugin"]
 
     with (
-        patch("app.api.endpoints.plugin.PluginManager", return_value=manager),
+        patch("app.api.endpoints.plugin.get_plugin_manager", return_value=manager),
         patch("app.api.endpoints.plugin.SystemConfigOper", return_value=config_oper),
         patch("app.api.endpoints.plugin.remove_plugin_api") as remove_api,
         patch("app.api.endpoints.plugin.remove_plugin_job") as remove_job,
@@ -269,7 +269,7 @@ def test_uninstall_plugin_runtime_propagates_unknown_plugin_without_deregisterin
     manager.uninstall_plugin.side_effect = LookupError("插件 DemoPlugin 不存在")
 
     with (
-        patch("app.agent.tools.impl._plugin_tool_utils.PluginManager", return_value=manager),
+        patch("app.agent.tools.impl._plugin_tool_utils.get_plugin_manager", return_value=manager),
         patch("app.application.plugin.routes.remove_plugin_api") as remove_api,
         patch("app.application.plugin.folders.remove_plugin_from_folders") as remove_folders,
         patch("app.application.scheduling.remove_plugin_job") as remove_job,
@@ -295,7 +295,7 @@ def test_uninstall_plugin_endpoint_and_agent_tool_share_manager_call():
     config_oper.async_set = AsyncMock()
 
     with (
-        patch("app.api.endpoints.plugin.PluginManager", return_value=manager),
+        patch("app.api.endpoints.plugin.get_plugin_manager", return_value=manager),
         patch("app.api.endpoints.plugin.SystemConfigOper", return_value=config_oper),
         patch("app.api.endpoints.plugin.remove_plugin_api"),
         patch("app.api.endpoints.plugin.remove_plugin_job"),
@@ -304,7 +304,7 @@ def test_uninstall_plugin_endpoint_and_agent_tool_share_manager_call():
         plugin_endpoint.uninstall_plugin("DemoPlugin", None)
 
     with (
-        patch("app.agent.tools.impl._plugin_tool_utils.PluginManager", return_value=manager),
+        patch("app.agent.tools.impl._plugin_tool_utils.get_plugin_manager", return_value=manager),
         patch("app.agent.tools.impl._plugin_tool_utils.SystemConfigOper", return_value=config_oper),
         patch("app.application.plugin.routes.remove_plugin_api"),
         patch("app.application.plugin.folders.remove_plugin_from_folders"),

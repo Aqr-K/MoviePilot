@@ -71,7 +71,7 @@ def test_set_default_target_marks_the_target_and_clears_the_rest(db):
     )
     plugin_manager = _plugin_manager_with_instances(["default", "alt"])
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         result = set_plugin_instance_default_target(PLUGIN_ID, "alt", None)
         assert result.success is True
 
@@ -179,7 +179,7 @@ def test_response_model_keeps_the_is_default_target_field(db):
     set_plugin_instance_default_target(PLUGIN_ID, "alt", None)
     plugin_manager = _plugin_manager_with_instances(["default", "alt"])
 
-    with patch("app.api.endpoints.plugin.PluginManager", return_value=plugin_manager):
+    with patch("app.api.endpoints.plugin.get_plugin_manager", return_value=plugin_manager):
         payload = list_plugin_instances(PLUGIN_ID, None)
 
     serialized = {

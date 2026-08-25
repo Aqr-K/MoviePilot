@@ -4,7 +4,6 @@ import json
 from typing import Any, Optional
 
 from app.application.plugin.runtime import get_plugin_manager
-from app.application.plugin.runtime import get_plugin_manager as PluginManager
 from app.application.plugin.install import PluginInstallCommand
 from app.application.configuration import get_configured_system_config as SystemConfigOper
 from app.adapters.external.server import MoviePilotServerHelper
@@ -391,7 +390,7 @@ async def uninstall_plugin_runtime(plugin_id: str) -> dict[str, Any]:
     from app.application.plugin.routes import remove_plugin_api
     from app.application.scheduling import remove_plugin_job
 
-    plugin_manager = PluginManager()
+    plugin_manager = get_plugin_manager()
     plugin_manager.uninstall_plugin(plugin_id)
 
     config_oper = SystemConfigOper()

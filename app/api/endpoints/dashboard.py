@@ -22,7 +22,7 @@ from app.api.deps import get_current_active_superuser, get_dashboard_query_servi
 from app.application.dashboard import DashboardQueryService
 from app.schemas.types import StorageAction
 from app.application.directory import DirectoryHelper
-from app.application.scheduling import Scheduler
+from app.application.scheduling import get_scheduler
 from app.adapters.system.host import SystemUtils
 
 router = ResponseAPIRouter()
@@ -162,7 +162,7 @@ async def schedule(_: Any = Depends(get_current_active_superuser)) -> Any:
     查询后台服务信息
     """
     # 同步 list() 内含同步进度读取，放到线程池执行避免阻塞事件循环
-    return await run_in_threadpool(Scheduler().list)
+    return await run_in_threadpool(get_scheduler().list)
 
 
 @router.get(
@@ -177,7 +177,7 @@ async def schedule_progress(
     查询指定后台服务的执行进度。
     """
     # 异步进度后端读取，避免同步 Redis 调用阻塞事件循环
-    progress = await Scheduler().aget_progress(job_id)
+    progress = await get_scheduler().aget_progress(job_id)
     if not progress:
         return _SchemaResponse(success=False, message="后台服务不存在")
     return _SchemaResponse(success=True, data=progress.model_dump())
@@ -193,7 +193,7 @@ async def schedule2(_: Annotated[str, Depends(verify_apitoken)]) -> Any:
     查询下载器信息 API_TOKEN认证（?token=xxx）
     """
     # 同步 list() 内含同步进度读取，放到线程池执行避免阻塞事件循环
-    return await run_in_threadpool(Scheduler().list)
+    return await run_in_threadpool(get_scheduler().list)
 
 
 @router.get(
@@ -208,7 +208,7 @@ async def schedule_progress2(
     查询指定后台服务的执行进度 API_TOKEN认证（?token=xxx）
     """
     # 异步进度后端读取，避免同步 Redis 调用阻塞事件循环
-    progress = await Scheduler().aget_progress(job_id)
+    progress = await get_scheduler().aget_progress(job_id)
     if not progress:
         return _SchemaResponse(success=False, message="后台服务不存在")
     return _SchemaResponse(success=True, data=progress.model_dump())

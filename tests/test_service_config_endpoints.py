@@ -729,7 +729,7 @@ def _absent_providers(installed: List[str], enabled_keys: set) -> Dict[str, dict
     )
     with patch("app.api.endpoints.service.get_configured_system_config",
                return_value=config_stub), \
-            patch("app.api.endpoints.service.PluginManager",
+            patch("app.api.endpoints.service.get_plugin_manager",
                   return_value=_PluginRuntimeStub(enabled_keys)):
         return _own(absent_service_providers(None))
 

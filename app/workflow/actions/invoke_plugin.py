@@ -1,7 +1,7 @@
 from pydantic import Field
 
 from app.workflow.actions import BaseAction
-from app.application.plugin.runtime import get_plugin_manager as PluginManager
+from app.application.plugin.runtime import get_plugin_manager
 from app.runtime.extensions.admission.service_instance_requirement import (
     SERVICE_INSTANCE_PARAM,
     resolve_required_service_instance,
@@ -56,7 +56,7 @@ class InvokePluginAction(BaseAction):
         if not params.plugin_id or not params.action_id:
             return context
         logger.info(f"调用插件动作: {params.plugin_id} - {params.action_id}")
-        action = PluginManager().get_plugin_action(params.plugin_id, params.action_id)
+        action = get_plugin_manager().get_plugin_action(params.plugin_id, params.action_id)
         action_params = dict(params.action_params)
         requirement = action.get("requires_service_instance")
         if requirement:
