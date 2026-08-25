@@ -2,10 +2,12 @@
 
 import re
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any, Optional
 
 from app.domain.context import MusicInfo
 from app.schemas.mediaserver import MediaServerItem as _SchemaMediaServerItem
+from app.schemas.mediaserver import MediaServerItemUserState as _SchemaMediaServerItemUserState
 from app.schemas.media import normalize_media_source, resolve_media_identity
 from app.schemas.types import MUSIC_ENTITY_ALBUM, MediaSource
 
@@ -239,3 +241,62 @@ class MusicMediaServerHelper:
             (item for item in items or [] if item and cls.item_matches(mediainfo, item)),
             None,
         )
+
+
+def format_emby_family_item(
+    item: Mapping[str, Any],
+    *,
+    server: str,
+    include_server_id: bool = False,
+) -> _SchemaMediaServerItem:
+    """把 Emby 系服务条目转换为统一媒体服务器模型，并保留各服务既有字段差异。
+
+    调用方负责捕获异常并记录日志：本层不依赖 app.runtime，不持有 logger。
+
+    :param item: 媒体服务器返回的原始条目字典
+    :param server: 媒体服务器标识（如 emby/jellyfin/zspace）
+    :param include_server_id: 是否在结果中投影服务端条目 ID
+    :return: 统一媒体服务器条目模型
+    """
+    user_data = item.get("UserData") or {}
+    if not user_data:
+        user_state = None
+    else:
+        resume = (
+            user_data.get("PlaybackPositionTicks")
+            and user_data.get("PlaybackPositionTicks") > 0
+        )
+        last_played_date = user_data.get("LastPlayedDate")
+        if last_played_date is not None and "." in last_played_date:
+            last_played_date = last_played_date.split(".")[0]
+        user_state = _SchemaMediaServerItemUserState(
+            played=user_data.get("Played"),
+            resume=resume,
+            last_played_date=datetime.strptime(
+                last_played_date,
+                "%Y-%m-%dT%H:%M:%S",
+            ).strftime("%Y-%m-%d %H:%M:%S") if last_played_date else None,
+            play_count=user_data.get("PlayCount"),
+            percentage=user_data.get("PlayedPercentage"),
+        )
+    media_source, media_id = MediaServerIdentityHelper.from_provider_ids(
+        item.get("ProviderIds")
+    )
+    fields = {
+        "server": server,
+        "library": item.get("ParentId"),
+        "item_id": item.get("Id"),
+        "item_type": item.get("Type"),
+        "title": item.get("Name"),
+        "original_title": item.get("OriginalTitle"),
+        "year": item.get("ProductionYear"),
+        "media_source": media_source,
+        "media_id": media_id,
+        "path": item.get("Path"),
+        "note": MusicMediaServerHelper.build_note(item)
+        if item.get("Type") in {"MusicAlbum", "Audio"} else None,
+        "user_state": user_state,
+    }
+    if include_server_id:
+        fields["server_id"] = item.get("ServerId")
+    return _SchemaMediaServerItem(**fields)

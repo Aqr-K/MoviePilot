@@ -1,7 +1,6 @@
 import json
 import re
 import traceback
-from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Union, Dict, Generator, Tuple, Any
 
@@ -9,13 +8,12 @@ from requests import Response
 
 from app.schemas.dashboard import Statistic as _SchemaStatistic
 from app.schemas.mediaserver import MediaServerItem as _SchemaMediaServerItem
-from app.schemas.mediaserver import MediaServerItemUserState as _SchemaMediaServerItemUserState
 from app.schemas.mediaserver import MediaServerLibrary as _SchemaMediaServerLibrary
 from app.schemas.mediaserver import MediaServerPlayItem as _SchemaMediaServerPlayItem
 from app.schemas.mediaserver import RefreshMediaItem as _SchemaRefreshMediaItem
 from app.schemas.mediaserver import WebhookEventInfo as _SchemaWebhookEventInfo
 from app.runtime.config import settings
-from app.domain.library import MediaServerIdentityHelper, MusicMediaServerHelper
+from app.domain.library import MediaServerIdentityHelper, format_emby_family_item
 from app.runtime.log import logger
 from app.schemas.mediaserver import MediaServerItem
 from app.schemas.types import MediaSource, MediaType
@@ -729,46 +727,12 @@ class Emby:
 
     @staticmethod
     def __format_item_info(item) -> Optional[_SchemaMediaServerItem]:
-        """
-        格式化item
-        """
+        """通过统一 Emby 系转换契约生成条目，并保留 Emby 的服务器 ID。"""
         try:
-            user_data = item.get("UserData", {})
-            if not user_data:
-                user_state = None
-            else:
-                resume = item.get("UserData", {}).get("PlaybackPositionTicks") and item.get("UserData", {}).get(
-                    "PlaybackPositionTicks") > 0
-                last_played_date = item.get("UserData", {}).get("LastPlayedDate")
-                if last_played_date is not None and "." in last_played_date:
-                    last_played_date = last_played_date.split(".")[0]
-                user_state = _SchemaMediaServerItemUserState(
-                    played=item.get("UserData", {}).get("Played"),
-                    resume=resume,
-                    last_played_date=datetime.strptime(last_played_date, "%Y-%m-%dT%H:%M:%S").strftime(
-                        "%Y-%m-%d %H:%M:%S") if last_played_date else None,
-                    play_count=item.get("UserData", {}).get("PlayCount"),
-                    percentage=item.get("UserData", {}).get("PlayedPercentage"),
-                )
-            media_source, media_id = MediaServerIdentityHelper.from_provider_ids(
-                item.get("ProviderIds")
-            )
-            return _SchemaMediaServerItem(
+            return format_emby_family_item(
+                item,
                 server="emby",
-                library=item.get("ParentId"),
-                server_id=item.get("ServerId"),
-                item_id=item.get("Id"),
-                item_type=item.get("Type"),
-                title=item.get("Name"),
-                original_title=item.get("OriginalTitle"),
-                year=item.get("ProductionYear"),
-                media_source=media_source,
-                media_id=media_id,
-                path=item.get("Path"),
-                note=MusicMediaServerHelper.build_note(item)
-                if item.get("Type") in {"MusicAlbum", "Audio"} else None,
-                user_state=user_state
-
+                include_server_id=True,
             )
         except Exception as e:
             logger.error(e)
