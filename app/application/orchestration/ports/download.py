@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from app.application.orchestration.ports.dispatch import CapabilityPorts
 from app.domain.context import Context
-from app.schemas.transfer import DownloaderTorrent
+from app.schemas.transfer import DownloaderFile, DownloaderTorrent
 from app.schemas.types import TorrentStatus
 
 
@@ -210,11 +210,11 @@ class DownloadPorts(CapabilityPorts):
 
     def torrent_files(
             self, tid: str, downloader: Optional[str] = None
-    ) -> Optional[Any]:
+    ) -> Optional[List[DownloaderFile]]:
         """
         获取种子文件
         :param tid:  种子Hash
         :param downloader:  下载器
-        :return: 种子文件，具体类型由下载器实现决定（链层不引入下载器协议类型）
+        :return: 与下载器 SDK 解耦的统一文件项列表
         """
         return self._dispatch.unicast("torrent_files", tid=tid, downloader=downloader)
