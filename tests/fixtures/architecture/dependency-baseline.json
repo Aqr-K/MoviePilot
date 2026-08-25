@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7102,
-  "edge_sha256": "3d10bfa9d093adc25e679370b89c0e335e4ea846338ab505baf3b269df34c30e",
+  "edge_count": 7103,
+  "edge_sha256": "116ee651f5febd4d2f9a2f8894b7425a6e5ca49ac47c93eadfda0f7eff22f760",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -159,6 +159,7 @@
     "app.adapters.external.server -> app.runtime.config",
     "app.adapters.external.server -> app.runtime.log",
     "app.adapters.external.server -> app.runtime.observability",
+    "app.adapters.external.server -> app.runtime.tasks",
     "app.adapters.external.server -> app.schemas",
     "app.adapters.external.server -> app.schemas.media",
     "app.adapters.external.server -> app.schemas.types",
