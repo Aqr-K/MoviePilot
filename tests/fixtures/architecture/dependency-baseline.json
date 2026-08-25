@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7108,
-  "edge_sha256": "932929455631486a5c9a37bf39cb3b386c01899e9bde2211b5c303fd9be89af9",
+  "edge_count": 7104,
+  "edge_sha256": "cafe51529d975d1b736c2a90f4c4e0eed620e4289902d29959c824671f794269",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -1606,8 +1606,6 @@
     "app.api.endpoints.agent -> app.agent",
     "app.api.endpoints.agent -> app.agent.callback",
     "app.api.endpoints.agent -> app.agent.contracts",
-    "app.api.endpoints.agent -> app.agent.llm",
-    "app.api.endpoints.agent -> app.agent.llm.capability",
     "app.api.endpoints.agent -> app.agent.mcp",
     "app.api.endpoints.agent -> app.agent.runtime_loader",
     "app.api.endpoints.agent -> app.api",
@@ -1830,7 +1828,7 @@
     "app.api.endpoints.history -> app.schemas.token",
     "app.api.endpoints.llm -> app.agent",
     "app.api.endpoints.llm -> app.agent.llm",
-    "app.api.endpoints.llm -> app.agent.llm.provider",
+    "app.api.endpoints.llm -> app.agent.llm.gateway",
     "app.api.endpoints.llm -> app.api",
     "app.api.endpoints.llm -> app.api.deps",
     "app.api.endpoints.llm -> app.api.response",
@@ -2625,8 +2623,6 @@
     "app.application.messaging.plugin -> app.application",
     "app.application.messaging.plugin -> app.application.messaging",
     "app.application.messaging.plugin -> app.application.messaging.interaction",
-    "app.application.messaging.plugin -> app.runtime",
-    "app.application.messaging.plugin -> app.runtime.events",
     "app.application.messaging.plugin -> app.schemas",
     "app.application.messaging.plugin -> app.schemas.message",
     "app.application.messaging.plugin -> app.schemas.types",
