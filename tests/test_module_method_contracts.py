@@ -219,6 +219,43 @@ def test_tmdb_capabilities_share_aggregation_across_sync_async_entry() -> None:
     assert async_tmdb_collection.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
 
 
+def test_music_capabilities_distinguish_lists_values_and_async_aliases() -> None:
+    """音乐查询应声明真实聚合，独立异步方法名必须复用同步契约语义。"""
+    list_methods = {
+        "music_album_related",
+        "music_artist_albums",
+        "music_artist_related",
+        "music_cache_items",
+        "music_chart",
+        "music_discover",
+        "music_fresh_releases",
+        "search_music",
+    }
+    value_methods = {
+        "identify_music_by_fingerprint",
+        "match_music_album",
+        "music_album",
+        "music_artist",
+        "music_cache_delete",
+        "music_lyrics",
+    }
+
+    for method in list_methods:
+        contract = get_module_method_contract(method)
+        assert contract.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
+        assert contract.result_shape is ModuleResultShape.LIST
+    for method in value_methods:
+        assert (
+            get_module_method_contract(method).aggregation
+            is ModuleResultAggregation.FIRST_NON_EMPTY
+        )
+    for sync_method in ("identify_music_by_fingerprint", "match_music_album"):
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(f"async_{sync_method}")
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert async_contract.required_parameters == sync_contract.required_parameters
+
+
 def test_high_frequency_capability_families_are_explicit() -> None:
     """媒体发现、识别、存储和消息族不能退回未分类 legacy 契约。"""
     expected_families = {
