@@ -432,4 +432,5 @@ async def lifespan(app: FastAPI):
                 )
         finally:
             # 日志最后关闭，确保其他组件的收尾信息已写入文件
-            LoggerManager.shutdown()
+            if LoggerManager.shutdown() is False:
+                raise RuntimeError("日志写入资源未在关停预算内收敛")

@@ -147,6 +147,23 @@ def test_lifespan_normal_mode_starts_full_runtime(monkeypatch):
         _assert_completed_once(step)
 
 
+def test_lifespan_propagates_logger_nonconvergence(monkeypatch):
+    """最后一个日志 owner 未收敛时 lifespan 必须以关闭失败结束。"""
+    shutdown_steps = _patch_lifespan(monkeypatch)
+    shutdown_steps["logger"].return_value = False
+
+    async def run_lifespan() -> None:
+        """运行完整生命周期并触发日志 writer 的诚实失败结果。"""
+        async with lifecycle.lifespan(FastAPI()):
+            pass
+
+    with pytest.raises(RuntimeError, match="日志写入资源未在关停预算内收敛"):
+        asyncio.run(run_lifespan())
+
+    for step in shutdown_steps.values():
+        _assert_completed_once(step)
+
+
 def test_lifespan_waits_for_plugin_settlement_before_shutdown(monkeypatch):
     """关停必须等待插件恢复线程结束，避免与备份和资源释放并发。"""
     shutdown_steps = _patch_lifespan(monkeypatch)
