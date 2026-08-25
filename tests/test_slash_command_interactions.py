@@ -237,7 +237,8 @@ class TestSlashCommandInteractions(unittest.TestCase):
         ]
 
         with patch(
-            "app.application.orchestration.subscribe.SubscribeOper.list", return_value=fake_subscribes
+            "app.application.orchestration.subscribe.get_chain_subscribe_port",
+            return_value=SimpleNamespace(list=lambda: fake_subscribes),
         ), patch.object(chain, "post_message") as post_message:
             chain.remote_list(channel=NotificationChannel.Web, userid="u1", source="web")
 
