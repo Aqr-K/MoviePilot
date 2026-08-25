@@ -20,13 +20,6 @@ def init_command():
     Command()
 
 
-def stop_command():
-    """
-    停止命令
-    """
-    pass
-
-
 def restart_command() -> Future:
     """
     重建命令并返回完成信号。

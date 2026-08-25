@@ -34,7 +34,7 @@ from app.runtime.tasks import TaskRegistry, configure_task_registry
 from app.adapters.external.server import MoviePilotServerHelper
 from app.runtime.state import SystemHelper
 from app.runtime.log import logger, LoggerManager
-from app.startup.command_initializer import init_command, stop_command, restart_command
+from app.startup.command_initializer import init_command, restart_command
 from app.startup.dataports_initializer import configure_data_ports
 from app.startup.domain_initializer import configure_domain_dependencies
 from app.startup.modules_initializer import init_modules, stop_modules
@@ -324,11 +324,8 @@ def build_lifecycle_components(app: FastAPI) -> tuple[LifecycleComponent, ...]:
             dependencies=("待处理整理回放",),
             mode=LifecycleMode.NORMAL_ONLY,
             start=init_command,
-            stop=stop_command,
             start_order=120,
-            stop_order=30,
             start_timeout_seconds=120,
-            stop_timeout_seconds=120,
         ),
         LifecycleComponent(
             name="工作流",

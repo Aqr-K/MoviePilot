@@ -59,7 +59,6 @@ def _patch_lifespan(monkeypatch, *, failing_step: str | None = None) -> dict:
     shutdown_steps = {
         "backup_plugins": system_chain.backup_plugins,
         "stop_workflow": MagicMock(),
-        "stop_command": MagicMock(),
         "stop_monitor": MagicMock(),
         "stop_scheduler": MagicMock(),
         "stop_plugins": MagicMock(),
@@ -68,7 +67,6 @@ def _patch_lifespan(monkeypatch, *, failing_step: str | None = None) -> dict:
     }
     for name in (
         "stop_workflow",
-        "stop_command",
         "stop_monitor",
         "stop_scheduler",
         "stop_plugins",
@@ -97,7 +95,6 @@ def _patch_lifespan(monkeypatch, *, failing_step: str | None = None) -> dict:
     [
         "backup_plugins",
         "stop_workflow",
-        "stop_command",
         "stop_monitor",
         "stop_scheduler",
         "stop_plugins",
@@ -219,7 +216,6 @@ def test_lifespan_safe_mode_skips_optional_runtime(monkeypatch):
     for name in (
         "backup_plugins",
         "stop_workflow",
-        "stop_command",
         "stop_monitor",
         "stop_scheduler",
         "stop_plugins",
@@ -274,7 +270,6 @@ def test_lifecycle_manifest_declares_normal_and_safe_mode_order() -> None:
         "后台任务登记器",
         "插件备份",
         "工作流",
-        "命令服务",
         "监控器",
         "定时器",
         "插件",
