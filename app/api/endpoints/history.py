@@ -16,7 +16,7 @@ from app.api.response import ResponseAPIRouter
 from app.api.context import get_background_task_registry, resolve_background_task_registry
 from app.runtime.tasks import TaskRegistry
 from app.agent.contracts import ReplyMode
-from app.agent.runtime_loader import get_running_agent_manager
+from app.application.agent import get_running_agent_manager
 from app.agent.prompt.transfer_redo import (
     build_batch_manual_redo_prompt,
     build_manual_redo_prompt,

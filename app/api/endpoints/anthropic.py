@@ -22,7 +22,7 @@ from app.api.openai_utils import (
     build_prompt,
     build_session_id,
 )
-from app.agent.runtime_loader import get_running_agent_manager
+from app.application.agent import get_running_agent_manager
 from app.runtime.config import settings
 from app.adapters.web.security.access import anthropic_api_key_header
 from app.api.context import (

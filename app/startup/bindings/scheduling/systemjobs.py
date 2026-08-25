@@ -58,7 +58,7 @@ async def agent_heartbeat() -> None:
     """
     智能体心跳唤醒：检查并执行待处理的定时任务。
     """
-    from app.agent.runtime_loader import get_running_agent_manager
+    from app.application.agent import get_running_agent_manager
 
     manager = get_running_agent_manager()
     if manager is None:

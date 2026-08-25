@@ -26,10 +26,8 @@ from app.api.openai_utils import (
     build_responses_input,
     build_session_id,
 )
-from app.agent.runtime_loader import (
-    get_moviepilot_agent_type,
-    get_running_agent_manager,
-)
+from app.agent.runtime_loader import get_moviepilot_agent_type
+from app.application.agent import get_running_agent_manager
 from app.agent.contracts import ReplyMode
 from app.runtime.config import settings
 from app.adapters.web.security.access import openai_bearer_scheme

@@ -190,7 +190,7 @@ class AgentTaskScheduling:
         :param trigger_source: 触发入口，scheduled-自动调度，manual-显式立即执行
         :return: 执行是否成功及结果摘要
         """
-        from app.agent.runtime_loader import get_running_agent_manager
+        from app.application.agent import get_running_agent_manager
 
         try:
             manager = get_running_agent_manager()
