@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7111,
-  "edge_sha256": "2dde3e8981643f315d692850a02d4437793bcd51a9a2d9893a6db63a33666eab",
+  "edge_count": 7115,
+  "edge_sha256": "49909951f7476a117ed3e21be02ac9f8194d942d70569d57470793d733ca3e40",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -195,6 +195,7 @@
     "app.adapters.network.doh -> app.foundation.singleton",
     "app.adapters.network.doh -> app.runtime",
     "app.adapters.network.doh -> app.runtime.config",
+    "app.adapters.network.doh -> app.runtime.execution",
     "app.adapters.network.doh -> app.runtime.log",
     "app.adapters.network.doh -> app.runtime.reload",
     "app.adapters.network.http -> app.runtime",
@@ -6250,6 +6251,7 @@
     "app.runtime.thread -> app.foundation.singleton",
     "app.runtime.thread -> app.runtime",
     "app.runtime.thread -> app.runtime.config",
+    "app.runtime.thread -> app.runtime.execution",
     "app.scheduler -> app.application",
     "app.scheduler -> app.application.scheduling",
     "app.scheduler -> app.runtime",
@@ -7012,6 +7014,7 @@
     "app.workflow -> app.application",
     "app.workflow -> app.application.orchestration",
     "app.workflow -> app.application.orchestration.data",
+    "app.workflow -> app.application.workflow",
     "app.workflow -> app.foundation",
     "app.workflow -> app.foundation.reflection",
     "app.workflow -> app.foundation.singleton",
@@ -7192,6 +7195,7 @@
     "app.workflow.service -> app.runtime",
     "app.workflow.service -> app.runtime.config",
     "app.workflow.service -> app.runtime.events",
+    "app.workflow.service -> app.runtime.execution",
     "app.workflow.service -> app.runtime.log",
     "app.workflow.service -> app.schemas",
     "app.workflow.service -> app.schemas.types",
