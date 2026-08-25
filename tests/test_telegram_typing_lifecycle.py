@@ -6,7 +6,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 
-from app.agent import AgentManager, _MessageTask, _async_start_processing_status
+from app.agent import (  # pylint: disable=no-name-in-module
+    AgentManager,
+    _MessageTask,
+    _async_start_processing_status,
+)
 from app.application.orchestration.message import MessageChain
 from app.command import Command, _finish_command_processing_status
 from app.modules.telegram import TelegramModule
@@ -258,6 +262,7 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
 
     def test_async_agent_leaves_processing_status_to_worker(self):
         chain = MessageChain.__new__(MessageChain)
+        chain.eventmanager = Mock()
 
         with patch.object(chain, "_record_user_message"), patch.object(
                 chain, "_mark_message_processing_started"
@@ -367,6 +372,7 @@ class TestTelegramTypingLifecycle(unittest.TestCase):
 
     def test_callback_stops_typing_when_message_handler_returns(self):
         chain = MessageChain.__new__(MessageChain)
+        chain.eventmanager = Mock()
         status = MessageChain._ProcessingStatus(
             channel=NotificationChannel.Telegram,
             source="telegram-test",
