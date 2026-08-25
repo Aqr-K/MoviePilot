@@ -224,6 +224,19 @@ def _load_transmission_module():
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
+    class _DownloaderFile:
+        """隔离加载 Transmission 时提供下载器文件 DTO 的最小契约。"""
+
+        @classmethod
+        def model_validate(cls, value):
+            """按生产 DTO 入口把 SDK 对象投影为测试快照。"""
+            if isinstance(value, cls):
+                return value
+            payload = value if isinstance(value, dict) else vars(value)
+            instance = cls()
+            instance.__dict__.update(payload)
+            return instance
+
     class TorrentStatus(Enum):
         TRANSFER = "transfer"
         DOWNLOADING = "downloading"
@@ -278,6 +291,7 @@ def _load_transmission_module():
     schemas_module.TransferTorrent = _TransferTorrent
     schemas_module.DownloadingTorrent = _DownloadingTorrent
     schemas_module.DownloaderTorrent = _DownloaderTorrent
+    schemas_module.DownloaderFile = _DownloaderFile
     schemas_module.DownloaderInfo = object
     schema_types_module.TorrentStatus = TorrentStatus
     schema_types_module.TorrentQueryStatus = TorrentQueryStatus
