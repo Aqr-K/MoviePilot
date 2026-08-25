@@ -199,7 +199,7 @@ def _no_exists_chain(multicast_results):
 
 def test_no_exists_excludes_episodes_only_present_on_disk(monkeypatch):
     """媒体服务器有 E1-3、磁盘有 E1-5 时，缺失集不应包含 E4、E5。"""
-    monkeypatch.setattr(download_module, "MediaServerOper", _FakeMediaServerOper)
+    monkeypatch.setattr(download_module, "get_chain_media_server_port", _FakeMediaServerOper)
     chain = _no_exists_chain(
         [
             _server_exists({1: [1, 2, 3]}),
@@ -216,7 +216,7 @@ def test_no_exists_excludes_episodes_only_present_on_disk(monkeypatch):
 
 def test_no_exists_reports_missing_episodes_when_no_source_has_them(monkeypatch):
     """所有来源都只有 E1-3 时，E4、E5 仍须判定为缺失。"""
-    monkeypatch.setattr(download_module, "MediaServerOper", _FakeMediaServerOper)
+    monkeypatch.setattr(download_module, "get_chain_media_server_port", _FakeMediaServerOper)
     chain = _no_exists_chain([_server_exists({1: [1, 2, 3]})])
     meta = SimpleNamespace(sea=None, season_list=[])
 
