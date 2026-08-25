@@ -3405,6 +3405,7 @@ class AgentManager:
         """
         if not settings.AI_AGENT_ENABLE:
             return False, "AI Agent 未启用"
+        accepting_before_claim = self._accepting_tasks
         oper = get_agent_task_port()
         task = oper.get(task_id)
         if not task or not task.enabled:
@@ -3449,7 +3450,14 @@ class AgentManager:
             raise
         except Exception as err:
             success = False
-            result = f"Agent 定时任务执行失败：{str(err)}"
+            error_message = str(err)
+            if (
+                    accepting_before_claim
+                    and not self._accepting_tasks
+                    and error_message == "AgentManager 未运行或已关闭"
+            ):
+                error_message = "AgentManager 已关闭"
+            result = f"Agent 定时任务执行失败：{error_message}"
             logger.error(f"Agent 定时任务 {task_id} 执行失败: {str(err)}")
             await AgentChain().async_post_message(
                 Message(

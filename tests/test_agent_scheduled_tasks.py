@@ -382,6 +382,7 @@ async def test_interrupted_date_task_manual_run_disables_and_removes_job(
     manager = SimpleNamespace(
         execute_scheduled_task=AgentManager.execute_scheduled_task,
         process_message=process_message,
+        _accepting_tasks=True,
     )
     manager.execute_scheduled_task = AgentManager.execute_scheduled_task.__get__(manager)
     monkeypatch.setattr(
