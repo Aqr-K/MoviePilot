@@ -4,7 +4,7 @@ from typing import Callable, Dict, List, Union, Optional, Generator, Any
 
 from app.application.orchestration import ChainBase
 from app.runtime.config import global_vars
-from app.application.orchestration.data import MediaServerPortProxy as MediaServerOper
+from app.application.orchestration.data import get_chain_media_server_port
 from app.runtime.extensions.service_config import ServiceConfigHelper
 from app.runtime.log import logger
 from app.schemas.mediaserver import MediaServerLibrary
@@ -295,7 +295,7 @@ class MediaServerChain(ChainBase):
         with lock:
             # 汇总统计
             total_count = 0
-            dboper = MediaServerOper()
+            dboper = get_chain_media_server_port()
             enabled_servers = [mediaserver.name for mediaserver in mediaservers
                                if mediaserver and mediaserver.enabled and mediaserver.name]
             dboper.delete_excluded_servers(enabled_servers)
