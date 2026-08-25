@@ -2201,9 +2201,11 @@ async def web_agent_stream(
                             return
                         yield ": heartbeat\n\n"
             except asyncio.CancelledError:
+                return
+            finally:
                 if not collection_task.done():
                     collection_task.cancel()
-                return
+                    await asyncio.gather(collection_task, return_exceptions=True)
 
             assistant_message = _build_web_agent_display_message_from_events(events)
             display_messages.append(assistant_message)
