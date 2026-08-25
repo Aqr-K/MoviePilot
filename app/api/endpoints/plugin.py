@@ -55,7 +55,6 @@ from app.db.models.pluginconfig import LOG_LEVELS
 from app.db.oper.pluginconfig import PluginConfigOper
 from app.api.principal import ApiPrincipal
 from app.application.configuration import get_configured_system_config
-from app.application.configuration import get_configured_system_config as SystemConfigOper
 from app.api.deps import (
     get_current_active_superuser,
     get_current_active_superuser_async,
@@ -1334,7 +1333,7 @@ def uninstall_plugin(
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     # 删除已安装信息
-    config_oper = SystemConfigOper()
+    config_oper = get_configured_system_config()
     install_plugins = config_oper.get(SystemConfigKey.UserInstalledPlugins) or []
     if plugin_id in install_plugins:
         install_plugins = [pid for pid in install_plugins if pid != plugin_id]

@@ -244,7 +244,7 @@ def test_uninstall_plugin_endpoint_deregisters_after_manager_succeeds():
 
     with (
         patch("app.api.endpoints.plugin.get_plugin_manager", return_value=manager),
-        patch("app.api.endpoints.plugin.SystemConfigOper", return_value=config_oper),
+        patch("app.api.endpoints.plugin.get_configured_system_config", return_value=config_oper),
         patch("app.api.endpoints.plugin.remove_plugin_api") as remove_api,
         patch("app.api.endpoints.plugin.remove_plugin_job") as remove_job,
         patch("app.api.endpoints.plugin.remove_plugin_from_folders") as remove_folders,
@@ -296,7 +296,7 @@ def test_uninstall_plugin_endpoint_and_agent_tool_share_manager_call():
 
     with (
         patch("app.api.endpoints.plugin.get_plugin_manager", return_value=manager),
-        patch("app.api.endpoints.plugin.SystemConfigOper", return_value=config_oper),
+        patch("app.api.endpoints.plugin.get_configured_system_config", return_value=config_oper),
         patch("app.api.endpoints.plugin.remove_plugin_api"),
         patch("app.api.endpoints.plugin.remove_plugin_job"),
         patch("app.api.endpoints.plugin.remove_plugin_from_folders"),
@@ -305,7 +305,7 @@ def test_uninstall_plugin_endpoint_and_agent_tool_share_manager_call():
 
     with (
         patch("app.agent.tools.impl._plugin_tool_utils.get_plugin_manager", return_value=manager),
-        patch("app.agent.tools.impl._plugin_tool_utils.SystemConfigOper", return_value=config_oper),
+        patch("app.agent.tools.impl._plugin_tool_utils.get_configured_system_config", return_value=config_oper),
         patch("app.application.plugin.routes.remove_plugin_api"),
         patch("app.application.plugin.folders.remove_plugin_from_folders"),
         patch("app.application.scheduling.remove_plugin_job"),

@@ -294,7 +294,7 @@ def test_install_plugin_runtime_reloads_in_threadpool() -> None:
 
     with (
         patch(
-            "app.agent.tools.impl._plugin_tool_utils.SystemConfigOper",
+            "app.agent.tools.impl._plugin_tool_utils.get_configured_system_config",
             return_value=config_oper,
         ),
         patch(
