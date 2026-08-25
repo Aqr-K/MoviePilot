@@ -1,7 +1,9 @@
 """废弃登记与文案。
 
 全仓所有「即将废弃」的对外文案集中在本模块的 ``NOTICES`` 里，调用点只引用稳定的
-``key``，不各自拼写提示语。
+``key``，不各自拼写提示语。旧 Facade 的登记标识与 ``compat.facade.hit`` 指标的
+``facade``/``operation`` 标签保持一致：整个 Facade 用 ``Facade``，单个方法用
+``Facade.method``。
 """
 from dataclasses import dataclass
 from enum import IntEnum
@@ -11,6 +13,8 @@ from typing import Mapping, Optional
 class DeprecationStage(IntEnum):
     """废弃生命周期阶段，数值越大距离物理删除越近。"""
 
+    # 仅登记：功能完全照常且不输出告警，只依赖命中指标观察真实用量
+    SILENT = 0
     # 标记预警：功能完全照常，仅在首次触达时输出告警
     WARN = 1
     # 默认关闭：功能默认不再生效，需在 DEPRECATION_ENABLED 中显式列出才恢复，用于观察真实依赖方
@@ -28,18 +32,18 @@ class DeprecationNotice:
     :param subject: 被废弃的符号或能力
     :param stage: 当前所处阶段
     :param since: 开始废弃的版本
-    :param remove_in: 计划物理删除的版本
     :param replacement: 替代方案
     :param reason: 废弃原因
+    :param remove_in: 计划物理删除的版本，尚未排期时为 None
     """
 
     key: str
     subject: str
     stage: DeprecationStage
     since: str
-    remove_in: str
     replacement: str
     reason: str
+    remove_in: Optional[str] = None
 
     def message(self, context: Optional[str] = None) -> str:
         """
@@ -48,7 +52,8 @@ class DeprecationNotice:
         :param context: 触发来源，例如插件标识
         :return: 单行提示语
         """
-        parts = [f"{self.subject} 已于 {self.since} 废弃，计划在 {self.remove_in} 移除"]
+        parts = [f"{self.subject} 自 {self.since} 起进入废弃流程"]
+        parts.append(f"计划在 {self.remove_in} 移除" if self.remove_in else "移除版本待定")
         if context:
             parts.append(f"触发来源：{context}")
         parts.append(f"原因：{self.reason}")
@@ -162,5 +167,50 @@ NOTICES: Mapping[str, DeprecationNotice] = {
         remove_in="v3.3.0",
         replacement="provides_dashboards()",
         reason="返回裸元信息列表，无契约校验，且无法声明专属配置界面",
+    ),
+    "PluginHelper.find_missing_dependencies": DeprecationNotice(
+        key="PluginHelper.find_missing_dependencies",
+        subject="PluginHelper.find_missing_dependencies()",
+        stage=DeprecationStage.SILENT,
+        since="v3.1.0",
+        remove_in="v3.3.0",
+        replacement="PluginDependencyInstaller.find_missing()",
+        reason="依赖处理已拆分到独立依赖适配器，此处只为旧市场入口保留转发",
+    ),
+    "PluginHelper.install_dependencies": DeprecationNotice(
+        key="PluginHelper.install_dependencies",
+        subject="PluginHelper.install_dependencies()",
+        stage=DeprecationStage.SILENT,
+        since="v3.1.0",
+        remove_in="v3.3.0",
+        replacement="PluginDependencyInstaller.install()",
+        reason="依赖处理已拆分到独立依赖适配器，此处只为旧市场入口保留转发",
+    ),
+    "PluginHelper.async_find_missing_dependencies": DeprecationNotice(
+        key="PluginHelper.async_find_missing_dependencies",
+        subject="PluginHelper.async_find_missing_dependencies()",
+        stage=DeprecationStage.SILENT,
+        since="v3.1.0",
+        remove_in="v3.3.0",
+        replacement="PluginDependencyInstaller.async_find_missing()",
+        reason="依赖处理已拆分到独立依赖适配器，此处只为旧异步市场入口保留转发",
+    ),
+    "PluginHelper.async_install_dependencies": DeprecationNotice(
+        key="PluginHelper.async_install_dependencies",
+        subject="PluginHelper.async_install_dependencies()",
+        stage=DeprecationStage.SILENT,
+        since="v3.1.0",
+        remove_in="v3.3.0",
+        replacement="PluginDependencyInstaller.async_install()",
+        reason="依赖处理已拆分到独立依赖适配器，此处只为旧异步市场入口保留转发",
+    ),
+    "SystemUtils.is_bluray_dir": DeprecationNotice(
+        key="SystemUtils.is_bluray_dir",
+        subject="SystemUtils.is_bluray_dir()",
+        stage=DeprecationStage.WARN,
+        since="v3.1.0",
+        remove_in="v3.3.0",
+        replacement="StorageChain().is_bluray_folder()",
+        reason="只按本地路径判断蓝光目录，无法覆盖非本地存储",
     ),
 }

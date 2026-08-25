@@ -67,12 +67,26 @@ def test_stage_removed_is_never_active(staged, monkeypatch):
     assert policy_module.is_active(key) is False
 
 
-def test_guard_only_raises_at_removed_stage(staged):
-    """阶段三触达即报错，前两个阶段放行。"""
-    for stage in (DeprecationStage.WARN, DeprecationStage.DISABLED):
-        key = staged(stage)
-        policy_module.guard(key)
+def test_guard_passes_at_warn_stage(staged):
+    """阶段一放行。"""
+    key = staged(DeprecationStage.WARN)
+    policy_module.guard(key)
 
+
+def test_guard_raises_at_disabled_stage_unless_enabled(staged, monkeypatch):
+    """阶段二默认拦截，显式列入开关后放行。"""
+    key = staged(DeprecationStage.DISABLED)
+    monkeypatch.setattr(policy_module, "_enabled_keys", frozenset)
+    with pytest.raises(DeprecatedFeatureError) as excinfo:
+        policy_module.guard(key)
+    assert "新接口" in str(excinfo.value)
+
+    monkeypatch.setattr(policy_module, "_enabled_keys", lambda: frozenset({key}))
+    policy_module.guard(key)
+
+
+def test_guard_raises_at_removed_stage(staged):
+    """阶段三触达即报错。"""
     key = staged(DeprecationStage.REMOVED)
     with pytest.raises(DeprecatedFeatureError) as excinfo:
         policy_module.guard(key)
@@ -108,8 +122,8 @@ def test_disabled_message_points_at_the_switch(staged):
     assert "DEPRECATION_ENABLED" in policy_module.get_notice(key).message()
 
 
-def test_decorator_runs_warns_then_skips_by_stage(staged, monkeypatch):
-    """装饰器在阶段一执行本体、阶段二跳过、阶段三抛错。"""
+def test_decorator_runs_warns_then_blocks_by_stage(staged, monkeypatch):
+    """装饰器在阶段一执行本体、阶段二和阶段三抛错。"""
     calls = []
     monkeypatch.setattr(policy_module.logger, "warning", lambda msg: None)
 
@@ -126,13 +140,30 @@ def test_decorator_runs_warns_then_skips_by_stage(staged, monkeypatch):
     staged(DeprecationStage.DISABLED, key)
     monkeypatch.setattr(policy_module, "_enabled_keys", frozenset)
     policy_module.reset_warned()
-    assert legacy() is None
+    with pytest.raises(DeprecatedFeatureError):
+        legacy()
     assert calls == ["ran"]
 
     staged(DeprecationStage.REMOVED, key)
     policy_module.reset_warned()
     with pytest.raises(DeprecatedFeatureError):
         legacy()
+
+
+def test_decorator_keeps_async_call_shape(staged, monkeypatch):
+    """异步函数经装饰后仍可被调度器识别为协程函数。"""
+    import asyncio
+    import inspect
+
+    monkeypatch.setattr(policy_module.logger, "warning", lambda msg: None)
+    key = staged(DeprecationStage.WARN)
+
+    @policy_module.deprecated(key)
+    async def legacy(value: int) -> int:
+        return value
+
+    assert inspect.iscoroutinefunction(legacy) is True
+    assert asyncio.run(legacy(3)) == 3
 
 
 def test_unknown_key_is_rejected():

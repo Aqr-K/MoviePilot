@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7108,
-  "edge_sha256": "cf67144a57afc9449f51405b0765b4387fb32d56bafa5b347ff698387429078d",
+  "edge_count": 7111,
+  "edge_sha256": "2dde3e8981643f315d692850a02d4437793bcd51a9a2d9893a6db63a33666eab",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -6212,6 +6212,9 @@
     "app.runtime.hostports.workflows -> app.runtime",
     "app.runtime.hostports.workflows -> app.runtime.hostports",
     "app.runtime.hostports.workflows -> app.runtime.hostports.port",
+    "app.runtime.observability -> app.runtime",
+    "app.runtime.observability -> app.runtime.deprecation",
+    "app.runtime.observability -> app.runtime.deprecation.policy",
     "app.runtime.progress -> app.runtime",
     "app.runtime.progress -> app.runtime.cache",
     "app.runtime.progress -> app.runtime.localization",
