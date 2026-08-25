@@ -177,6 +177,11 @@ def test_telegram_stop_closes_sdk_and_waits_for_polling_thread():
     client._bot = bot
     polling_thread = Mock()
     client._polling_thread = polling_thread
+    client._typing_tasks = {}
+    client._typing_stop_flags = {}
+    client._typing_lock = threading.RLock()
+    client._typing_lifecycle_lock = threading.RLock()
+    client._typing_accepting = True
 
     client.stop()
     client.stop()
