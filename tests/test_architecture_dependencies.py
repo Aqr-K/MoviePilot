@@ -1389,6 +1389,23 @@ def test_runtime_consumers_use_scheduler_application_facade():
     assert violations == {}
 
 
+def test_runtime_consumers_use_module_manager_application_facade():
+    """ModuleManager concrete 实现只允许组合根和既有 Facade 直接依赖。"""
+    allowed = {
+        "app.sdk.plugins",
+        "app.startup.modules_initializer",
+        "app.runtime.extensions.service_registry",
+    }
+    violations = {
+        module_name: dependencies & {"app.runtime.extensions.module_manager"}
+        for module_name, dependencies in _build_module_graph().items()
+        if module_name not in allowed
+        and "app.runtime.extensions.module_manager" in dependencies
+    }
+
+    assert violations == {}
+
+
 def test_runtime_consumers_use_plugin_application_facade():
     """插件 concrete 管理器只允许组合根和兼容 SDK 直接依赖。"""
     allowed = {
