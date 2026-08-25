@@ -177,6 +177,48 @@ def test_anilist_capabilities_share_aggregation_across_sync_async_entry() -> Non
         assert sync_contract.aggregation is ModuleResultAggregation.FIRST_NON_EMPTY
 
 
+def test_tmdb_capabilities_share_aggregation_across_sync_async_entry() -> None:
+    """TMDB 同步与异步查询必须共享列表合并或首个非空聚合语义。
+
+    tmdb_collection 只登记异步端、tmdb_episodes 只登记同步端：另一端已按
+    _SOURCE_PREFIXED_LEGACY_METHODS（tmdb_collection、async_tmdb_episodes）
+    冻结为未分类 legacy 契约，不参与同步/异步对齐比较。
+    """
+    list_methods = (
+        "tmdb_discover",
+        "tmdb_group_seasons",
+        "tmdb_movie_credits",
+        "tmdb_movie_recommend",
+        "tmdb_movie_similar",
+        "tmdb_person_credits",
+        "tmdb_seasons",
+        "tmdb_trending",
+        "tmdb_tv_credits",
+        "tmdb_tv_recommend",
+        "tmdb_tv_similar",
+    )
+    value_methods = ("tmdb_info", "tmdb_person_detail")
+
+    for sync_method in list_methods:
+        async_method = f"async_{sync_method}"
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert sync_contract.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
+        assert sync_contract.result_shape is ModuleResultShape.LIST
+    for sync_method in value_methods:
+        async_method = f"async_{sync_method}"
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert sync_contract.aggregation is ModuleResultAggregation.FIRST_NON_EMPTY
+
+    tmdb_episodes = get_module_method_contract("tmdb_episodes")
+    assert tmdb_episodes.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
+    async_tmdb_collection = get_module_method_contract("async_tmdb_collection")
+    assert async_tmdb_collection.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
+
+
 def test_high_frequency_capability_families_are_explicit() -> None:
     """媒体发现、识别、存储和消息族不能退回未分类 legacy 契约。"""
     expected_families = {
