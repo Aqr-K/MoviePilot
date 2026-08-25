@@ -58,6 +58,34 @@ def test_recognize_and_search_share_aggregation_across_sync_async_entry() -> Non
     assert get_module_method_contract("search_medias").result_shape is ModuleResultShape.LIST
 
 
+def test_discovery_lists_share_aggregation_across_sync_async_entry() -> None:
+    """媒体榜单与搜索的同步、异步入口必须共享有序列表聚合语义。"""
+    sync_methods = (
+        "movie_hot",
+        "movie_showing",
+        "movie_top250",
+        "search_collections",
+        "search_persons",
+        "search_subtitles",
+        "search_torrents",
+        "tv_animation",
+        "tv_hot",
+        "tv_weekly_chinese",
+        "tv_weekly_global",
+    )
+
+    for sync_method in sync_methods:
+        async_method = f"async_{sync_method}"
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert async_contract.required_parameters == sync_contract.required_parameters
+        assert async_contract.result_shape is sync_contract.result_shape
+        assert sync_contract.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
+        assert sync_contract.result_shape is ModuleResultShape.LIST
+        assert sync_contract.required_parameters
+
+
 def test_high_frequency_capability_families_are_explicit() -> None:
     """媒体发现、识别、存储和消息族不能退回未分类 legacy 契约。"""
     expected_families = {
