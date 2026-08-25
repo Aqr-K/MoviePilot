@@ -416,6 +416,87 @@ async def test_cancelled_install_waits_for_rollback_before_releasing_lifecycle()
 
 
 @pytest.mark.asyncio
+async def test_repeated_checkpoint_cancellation_preserves_checkpoint() -> None:
+    """快照等待被连续取消时，state.checkpoint 必须保留到快照子任务终态。"""
+    checkpoint_started = asyncio.Event()
+    checkpoint_release = asyncio.Event()
+    checkpoint_finished = asyncio.Event()
+    checkpoint_value = object()
+
+    async def checkpoint(_plugin_id: str) -> object:
+        """阻塞快照创建，直到测试确认结果仍会被等待到。"""
+        checkpoint_started.set()
+        await checkpoint_release.wait()
+        checkpoint_finished.set()
+        return checkpoint_value
+
+    command = _command(checkpointer=checkpoint)
+    task = asyncio.create_task(
+        command.execute(
+            plugin_id="DemoPlugin",
+            repo_url="https://github.com/demo/plugins",
+        )
+    )
+    await checkpoint_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+
+    assert task.done() is False
+
+    checkpoint_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert checkpoint_finished.is_set()
+
+
+@pytest.mark.asyncio
+async def test_repeated_rollback_cancellation_completes_compensation() -> None:
+    """补偿等待被再次连续取消时，仍须等到补偿子任务真正结束。"""
+    install_started = asyncio.Event()
+    rollback_started = asyncio.Event()
+    rollback_release = asyncio.Event()
+    rollback_finished = asyncio.Event()
+
+    async def install(*_args) -> tuple[bool, str]:
+        """阻塞包安装，使首次取消进入补偿路径。"""
+        install_started.set()
+        await asyncio.Event().wait()
+        return True, "ok"
+
+    async def rollback(_checkpoint: object) -> None:
+        """阻塞文件补偿，直到测试确认补偿仍会被等待到。"""
+        rollback_started.set()
+        await rollback_release.wait()
+        rollback_finished.set()
+
+    command = _command(installer=install, rollback=rollback)
+    task = asyncio.create_task(
+        command.execute(
+            plugin_id="DemoPlugin",
+            repo_url="https://github.com/demo/plugins",
+        )
+    )
+    await install_started.wait()
+    task.cancel()
+    await rollback_started.wait()
+
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0.02)
+    assert task.done() is False
+
+    rollback_release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert rollback_finished.is_set()
+
+
+@pytest.mark.asyncio
 async def test_cancelled_persisted_list_is_restored_conservatively() -> None:
     """清单写入已产生副作用但尚未返回时取消，也必须恢复原清单。"""
     persisted: list[list[str]] = []

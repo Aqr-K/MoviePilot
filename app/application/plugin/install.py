@@ -25,6 +25,22 @@ PluginReloader = Callable[[str], Awaitable[object]]
 PluginRegistrationRefresher = Callable[[str], Awaitable[object]]
 
 
+async def _await_task_to_terminal(task: "asyncio.Task[Any]") -> Any:
+    """忽略调用方的重复取消，直到受屏蔽子任务进入真实终态。
+
+    参数：
+        task：已用 asyncio.shield 屏蔽外部取消的子任务。
+    返回：
+        子任务的最终结果。
+    """
+    while not task.done():
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            continue
+    return task.result()
+
+
 @dataclass(frozen=True, slots=True)
 class PluginInstallRollback:
     """描述失败安装中各类可补偿副作用的恢复结果。"""
@@ -165,7 +181,7 @@ class PluginInstallCommand:
             state.checkpoint = checkpoint
         except asyncio.CancelledError:
             try:
-                state.checkpoint = await asyncio.shield(checkpoint_task)
+                state.checkpoint = await _await_task_to_terminal(checkpoint_task)
             except BaseException:
                 pass
             raise
@@ -329,14 +345,8 @@ class PluginInstallCommand:
             )
         )
         try:
-            result = await asyncio.shield(rollback_task)
-        except asyncio.CancelledError:
-            try:
-                result = await asyncio.shield(rollback_task)
-            except BaseException as err:
-                logger.error(f"插件 {plugin_id} 取消后的补偿未完成：{err}")
-                return
-        except Exception as err:
+            result = await _await_task_to_terminal(rollback_task)
+        except BaseException as err:
             logger.error(f"插件 {plugin_id} 取消后的补偿失败：{err}")
             return
         if result.rollback.errors:
