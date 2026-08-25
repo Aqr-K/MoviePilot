@@ -2548,7 +2548,7 @@
       "EventType.NoticeMessage": {
         "consumers": [
           {
-            "caller": "app.api.endpoints.agent",
+            "caller": "app.startup.modules_initializer",
             "count": 1
           }
         ],

@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7104,
-  "edge_sha256": "cafe51529d975d1b736c2a90f4c4e0eed620e4289902d29959c824671f794269",
+  "edge_count": 7108,
+  "edge_sha256": "cf67144a57afc9449f51405b0765b4387fb32d56bafa5b347ff698387429078d",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -1625,7 +1625,6 @@
     "app.api.endpoints.agent -> app.application.security.user",
     "app.api.endpoints.agent -> app.runtime",
     "app.api.endpoints.agent -> app.runtime.config",
-    "app.api.endpoints.agent -> app.runtime.events",
     "app.api.endpoints.agent -> app.runtime.execution",
     "app.api.endpoints.agent -> app.runtime.localization",
     "app.api.endpoints.agent -> app.runtime.log",
@@ -2586,6 +2585,11 @@
     "app.application.mediaserver -> app.schemas.types",
     "app.application.messaging.agent -> app.runtime",
     "app.application.messaging.agent -> app.runtime.channels",
+    "app.application.messaging.agent -> app.runtime.log",
+    "app.application.messaging.agent -> app.schemas",
+    "app.application.messaging.agent -> app.schemas.message",
+    "app.application.messaging.agent -> app.schemas.notification",
+    "app.application.messaging.agent -> app.schemas.types",
     "app.application.messaging.chat -> app.schemas",
     "app.application.messaging.chat -> app.schemas.agent",
     "app.application.messaging.gateway -> app.application",
