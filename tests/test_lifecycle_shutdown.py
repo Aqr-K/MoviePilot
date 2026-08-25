@@ -646,6 +646,19 @@ def test_stop_modules_propagates_false_without_skipping_later_cleanup(monkeypatc
         _assert_completed_once(dependency)
 
 
+def test_stop_modules_propagates_message_queue_nonconvergence(monkeypatch):
+    """消息队列线程未终止时必须由模块服务关闭结果向上暴露。"""
+    monkeypatch.setattr(modules_initializer, "stop_agent", AsyncMock())
+    dependencies = _patch_module_shutdown_dependencies(monkeypatch)
+    dependencies["stop_message"].return_value = False
+
+    converged = asyncio.run(modules_initializer.stop_modules())
+
+    assert converged is False
+    for dependency in dependencies.values():
+        _assert_completed_once(dependency)
+
+
 def test_stop_modules_continues_after_step_cancellation(monkeypatch):
     """单个关闭步骤被取消（如外层超时）不得跳过后续全部资源收口。"""
     stop_agent = AsyncMock(side_effect=asyncio.CancelledError())
