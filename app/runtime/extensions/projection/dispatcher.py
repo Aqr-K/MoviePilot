@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from enum import StrEnum
 from typing import Any, Protocol
 
 from app.foundation.reflection import ObjectUtils
@@ -15,6 +16,7 @@ from app.runtime.extensions.contract.extension import (
 )
 from app.runtime.extensions.lifecycle.host_module_adapter import HostModuleProviderSource
 from app.runtime.extensions.contract.module_method import (
+    ModuleResultAggregation,
     diagnose_module_callable,
     diagnose_module_result,
     get_module_method_contract,
@@ -52,6 +54,14 @@ class PluginModuleCatalog(Protocol):
 
 ModuleErrorHandler = Callable[..., None]
 AsyncFunctionRunner = Callable[..., Any]
+
+
+class _ProviderCallMode(StrEnum):
+    """描述接力链中下一个 provider 应采用的调用方式。"""
+
+    ORIGINAL = "original"
+    RELAY = "relay"
+    STOP = "stop"
 
 
 class ModuleInvocationDispatcher:
@@ -412,27 +422,21 @@ class ModuleInvocationDispatcher:
         :param kwargs: 透传给提供者的命名参数
         :return: 本阶段结束后的接力结果
         """
+        aggregation = get_module_method_contract(method).aggregation
         for provider in providers:
             try:
                 self._announce_invocation(provider, method)
                 self._record_legacy_hit(method, provider)
                 self._diagnose_callable(method, provider.invoke, provider.display_name)
-                if self.is_valid_empty(result):
-                    result = provider.invoke(*args, **kwargs)
-                    self._diagnose_result(method, result, provider)
-                elif provider.relays_result and ObjectUtils.check_signature(
-                    provider.invoke,
-                    result,
-                ):
-                    result = provider.invoke(result)
-                    self._diagnose_result(method, result, provider)
-                elif isinstance(result, list):
-                    temp = provider.invoke(*args, **kwargs)
-                    self._diagnose_result(method, temp, provider)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
+                call_mode = self._provider_call_mode(aggregation, result, provider)
+                if call_mode is _ProviderCallMode.STOP:
                     break
+                if call_mode is _ProviderCallMode.RELAY:
+                    provider_result = provider.invoke(result)
+                else:
+                    provider_result = provider.invoke(*args, **kwargs)
+                self._diagnose_result(method, provider_result, provider)
+                result = self._aggregate_provider_result(result, provider_result, call_mode)
             except RateLimitExceededException as err:
                 self._report_rate_limit(provider, method, err, **kwargs)
             except Exception as err:
@@ -456,31 +460,77 @@ class ModuleInvocationDispatcher:
         :param kwargs: 透传给提供者的命名参数
         :return: 本阶段结束后的接力结果
         """
+        aggregation = get_module_method_contract(method).aggregation
         for provider in providers:
             try:
                 self._announce_invocation(provider, method)
                 self._record_legacy_hit(method, provider)
                 self._diagnose_callable(method, provider.invoke, provider.display_name)
-                if self.is_valid_empty(result):
-                    result = await self._async_call(provider.invoke, *args, **kwargs)
-                    self._diagnose_result(method, result, provider)
-                elif provider.relays_result and ObjectUtils.check_signature(
-                    provider.invoke,
-                    result,
-                ):
-                    result = await self._async_call(provider.invoke, result)
-                    self._diagnose_result(method, result, provider)
-                elif isinstance(result, list):
-                    temp = await self._async_call(provider.invoke, *args, **kwargs)
-                    self._diagnose_result(method, temp, provider)
-                    if isinstance(temp, list):
-                        result.extend(temp)
-                else:
+                call_mode = self._provider_call_mode(aggregation, result, provider)
+                if call_mode is _ProviderCallMode.STOP:
                     break
+                if call_mode is _ProviderCallMode.RELAY:
+                    provider_result = await self._async_call(provider.invoke, result)
+                else:
+                    provider_result = await self._async_call(provider.invoke, *args, **kwargs)
+                self._diagnose_result(method, provider_result, provider)
+                result = self._aggregate_provider_result(result, provider_result, call_mode)
             except RateLimitExceededException as err:
                 self._report_rate_limit(provider, method, err, **kwargs)
             except Exception as err:
                 self._report_fault(provider, method, err, **kwargs)
+        return result
+
+    @classmethod
+    def _provider_call_mode(
+        cls,
+        aggregation: ModuleResultAggregation,
+        result: Any,
+        provider: ExtensionProvider,
+    ) -> _ProviderCallMode:
+        """按方法契约选择下一 provider 的调用方式，并冻结 legacy 接力语义。
+
+        :param aggregation: 方法契约声明的聚合策略
+        :param result: 上一阶段的接力结果
+        :param provider: 待决策的下一个提供者
+        :return: 下一个提供者应采用的调用方式
+        """
+        if cls.is_valid_empty(result):
+            return _ProviderCallMode.ORIGINAL
+        if aggregation is ModuleResultAggregation.FIRST_NON_EMPTY:
+            return _ProviderCallMode.STOP
+        if aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE:
+            return (
+                _ProviderCallMode.ORIGINAL
+                if isinstance(result, list)
+                else _ProviderCallMode.STOP
+            )
+        if provider.relays_result and ObjectUtils.check_signature(
+            provider.invoke,
+            result,
+        ):
+            return _ProviderCallMode.RELAY
+        if isinstance(result, list):
+            return _ProviderCallMode.ORIGINAL
+        return _ProviderCallMode.STOP
+
+    @staticmethod
+    def _aggregate_provider_result(
+        result: Any,
+        provider_result: Any,
+        call_mode: _ProviderCallMode,
+    ) -> Any:
+        """合并单个 provider 结果，接力调用则用新结果替换旧结果。
+
+        :param result: 上一阶段的接力结果
+        :param provider_result: 本次 provider 调用产出
+        :param call_mode: 本次调用采用的方式
+        :return: 合并后的接力结果
+        """
+        if call_mode is _ProviderCallMode.RELAY or not isinstance(result, list):
+            return provider_result
+        if isinstance(provider_result, list):
+            result.extend(provider_result)
         return result
 
     @staticmethod
