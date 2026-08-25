@@ -7,7 +7,6 @@ TransferChain 中。mixin 方法运行时经 MRO 解析，共享 TransferChain �
 注意：这里的方法均已去掉私有名前缀双下划线（__ -> _），因为 Python 的名字
 改编按定义类生效，方法迁到 mixin 后 __ 前缀会改变改编目标，导致跨类调用失败。
 """
-import asyncio
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -34,6 +33,7 @@ from app.domain.meta.metamusic import MetaMusic
 from app.foundation import text as text_tools
 from app.runtime.config import global_vars, settings
 from app.runtime.log import logger
+from app.runtime.tasks import get_task_registry
 from app.schemas.file import FileURI
 from app.schemas.workflow import FileItem
 from app.schemas.message import Message
@@ -1459,7 +1459,11 @@ class FailedRetryMixin:
                     )
                 )
 
-        asyncio.run_coroutine_threadsafe(_run_ai_takeover(), global_vars.loop)
+        get_task_registry().submit_threadsafe(
+            _run_ai_takeover(),
+            loop=global_vars.loop,
+            owner="chain.transfer.ai_takeover",
+        )
 
     def _re_transfer(
             self,
