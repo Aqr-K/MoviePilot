@@ -1,6 +1,8 @@
 """类型化 HostRuntime 与 FastAPI AppState 注入测试。"""
 
+import ast
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +20,8 @@ from app.api.data import (
 )
 from app.api.host_runtime import AgentChatRuntime, HostRuntime
 from app.startup import lifecycle
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class _Repository:
@@ -126,6 +130,26 @@ def test_fastapi_dependencies_use_fake_runtime_without_real_services() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"same_session": True}
+
+
+def test_string_api_data_locator_is_confined_to_compatibility_boundary() -> None:
+    """字符串数据注册表只能由 startup 注入并经旧 Facade 转发。"""
+    importers = set()
+    for path in (PROJECT_ROOT / "app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = {
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        }
+        if imported_modules & {"app.api.data"}:
+            importers.add(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert importers == {
+        "app/api/deps.py",
+        "app/startup/dataports_initializer.py",
+        "app/startup/modules_initializer.py",
+    }
 
 
 @pytest.mark.asyncio
