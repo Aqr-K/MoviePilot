@@ -364,22 +364,33 @@ def close_browser_sessions() -> None:
     BrowserSessionHelper.close_all_sessions()
 
 
-async def stop_modules():
+async def stop_modules() -> bool:
     """
-    服务关闭
+    关闭模块服务，并返回全部资源 owner 是否收敛。
     """
-    async def run_step(name: str, callback: Callable[[], object]) -> None:
-        """单个模块资源关闭失败或被取消时继续执行后续阶段"""
+    all_converged = True
+
+    async def run_step(name: str, callback: Callable[[], object]) -> bool:
+        """执行单个关闭步骤，失败或被取消时继续收口并保留诚实结果。"""
+        nonlocal all_converged
         try:
             result = callback()
             if inspect.isawaitable(result):
-                await result
+                result = await result
+            converged = result is not False
+            if not converged:
+                logger.error(f"关闭{name}未收敛，继续执行后续资源收口")
         except asyncio.CancelledError:
             # 外层关闭超时会取消当前正在执行的步骤；吞掉取消而不是让它继续向上
             # 传播，否则本步骤之后的全部资源收口都会被跳过。
             logger.warning(f"关闭{name}时收到取消请求，继续执行后续资源收口")
+            converged = False
         except Exception as err:
             logger.error(f"关闭{name}失败：{err}")
+            converged = False
+        if not converged:
+            all_converged = False
+        return converged
 
     await run_step("AI智能体", stop_agent)
     await run_step("图片代理安全日志合并器", close_image_proxy_block_log_coalescer)
@@ -396,6 +407,7 @@ async def stop_modules():
     await run_step("数据库连接", close_database)
     await run_step("前端服务", stop_frontend)
     await run_step("临时文件", clear_temp)
+    return all_converged
 
 
 async def init_modules() -> HostRuntime:

@@ -625,9 +625,23 @@ def test_stop_modules_continues_after_internal_owner_failures(monkeypatch):
     dependencies = _patch_module_shutdown_dependencies(monkeypatch)
     dependencies["module"].side_effect = RuntimeError("module failed")
 
-    asyncio.run(modules_initializer.stop_modules())
+    converged = asyncio.run(modules_initializer.stop_modules())
 
+    assert converged is False
     stop_agent.assert_awaited_once_with()
+    for dependency in dependencies.values():
+        _assert_completed_once(dependency)
+
+
+def test_stop_modules_propagates_false_without_skipping_later_cleanup(monkeypatch):
+    """关闭回调显式返回 False 时不得被转换为整体成功。"""
+    monkeypatch.setattr(modules_initializer, "stop_agent", AsyncMock())
+    dependencies = _patch_module_shutdown_dependencies(monkeypatch)
+    dependencies["module"].return_value = False
+
+    converged = asyncio.run(modules_initializer.stop_modules())
+
+    assert converged is False
     for dependency in dependencies.values():
         _assert_completed_once(dependency)
 
@@ -638,8 +652,9 @@ def test_stop_modules_continues_after_step_cancellation(monkeypatch):
     monkeypatch.setattr(modules_initializer, "stop_agent", stop_agent)
     dependencies = _patch_module_shutdown_dependencies(monkeypatch)
 
-    asyncio.run(modules_initializer.stop_modules())
+    converged = asyncio.run(modules_initializer.stop_modules())
 
+    assert converged is False
     stop_agent.assert_awaited_once_with()
     for dependency in dependencies.values():
         _assert_completed_once(dependency)
@@ -655,8 +670,9 @@ def test_stop_modules_drains_web_agent_background_tasks_before_database(monkeypa
     )
     dependencies["close_database"].side_effect = lambda: order.append("database")
 
-    asyncio.run(modules_initializer.stop_modules())
+    converged = asyncio.run(modules_initializer.stop_modules())
 
+    assert converged is True
     assert order == ["web-agent", "database"]
 
 

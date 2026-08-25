@@ -154,9 +154,9 @@ async def close_materialized_terminal_sessions() -> None:
         await close()
 
 
-async def begin_agent_shutdown() -> None:
-    """不可逆关闭首用闸门，并等待全部同步及异步能力释放。"""
+async def begin_agent_shutdown() -> bool:
+    """不可逆关闭首用闸门，并返回全部 Agent 能力是否真实收敛。"""
     try:
-        await _ensure_runtime().shutdown_async(reason="application_shutdown")
+        return await _ensure_runtime().shutdown_async(reason="application_shutdown")
     finally:
         await close_materialized_terminal_sessions()

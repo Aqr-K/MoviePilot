@@ -1150,7 +1150,8 @@ class CapabilityRuntime:
         """同步撤销并停止能力资源；物化实现保留供后续显式重启。"""
         self._stop_sync(capability_id, reason=reason, shutdown=False)
 
-    def _stop_sync(self, capability_id: str, *, reason: str, shutdown: bool) -> None:
+    def _stop_sync(self, capability_id: str, *, reason: str, shutdown: bool) -> bool:
+        """停止同步能力并返回资源 owner 是否已经真实收敛。"""
         state = self._state(capability_id)
         adapter = self._adapter(state, AdapterExecutionMode.SYNC)
         while True:
@@ -1170,7 +1171,7 @@ class CapabilityRuntime:
                     if stop_owner is None and pending is None:
                         if state.lifecycle is not CapabilityLifecycleState.FAILED:
                             state.lifecycle = CapabilityLifecycleState.STOPPED
-                        return
+                        return True
                     state.generation += 1
                     generation = state.generation
                     future: Future[Any] = Future()
@@ -1190,8 +1191,10 @@ class CapabilityRuntime:
                 except BaseException:
                     if not shutdown:
                         raise
+                    if waiter_operation == "stop":
+                        return False
                 if waiter_operation == "stop":
-                    return
+                    return True
                 continue
             break
 
@@ -1231,6 +1234,7 @@ class CapabilityRuntime:
                 reason=reason,
                 started_at=started_at,
             )
+            return True
         except BaseException as error:
             with state.lock:
                 state.lifecycle = CapabilityLifecycleState.FAILED
@@ -1253,12 +1257,20 @@ class CapabilityRuntime:
             )
             if not shutdown:
                 raise operation_error from error
+            return False
 
     async def stop_async(self, capability_id: str, *, reason: str) -> None:
         """异步撤销并停止能力资源。"""
         await self._stop_async(capability_id, reason=reason, shutdown=False)
 
-    async def _stop_async(self, capability_id: str, *, reason: str, shutdown: bool) -> None:
+    async def _stop_async(
+        self,
+        capability_id: str,
+        *,
+        reason: str,
+        shutdown: bool,
+    ) -> bool:
+        """停止异步能力并返回资源 owner 是否已经真实收敛。"""
         state = self._state(capability_id)
         adapter = self._adapter(state, AdapterExecutionMode.ASYNC)
         while True:
@@ -1278,7 +1290,7 @@ class CapabilityRuntime:
                     if stop_owner is None and pending is None:
                         if state.lifecycle is not CapabilityLifecycleState.FAILED:
                             state.lifecycle = CapabilityLifecycleState.STOPPED
-                        return
+                        return True
                     state.generation += 1
                     generation = state.generation
                     future: Future[Any] = Future()
@@ -1298,8 +1310,10 @@ class CapabilityRuntime:
                 except BaseException:
                     if not shutdown:
                         raise
+                    if waiter_operation == "stop":
+                        return False
                 if waiter_operation == "stop":
-                    return
+                    return True
                 continue
             break
 
@@ -1345,6 +1359,7 @@ class CapabilityRuntime:
                 reason=reason,
                 started_at=started_at,
             )
+            return True
         except BaseException as error:
             with state.lock:
                 state.lifecycle = CapabilityLifecycleState.FAILED
@@ -1367,9 +1382,10 @@ class CapabilityRuntime:
             )
             if not shutdown:
                 raise operation_error from error
+            return False
 
-    def shutdown(self, *, reason: str) -> None:
-        """不可逆关闭仅含同步 adapter 的 Runtime，并阻止并发首启重新发布。"""
+    def shutdown(self, *, reason: str) -> bool:
+        """不可逆关闭同步 Runtime，并返回全部 owner 是否收敛。"""
         async_kinds = {
             kind
             for kind, adapter in self._adapters.items()
@@ -1381,18 +1397,25 @@ class CapabilityRuntime:
             )
         with self._shutdown_lock:
             self._shutdown = True
+        converged = True
         for spec in self._registry.list_specs():
-            self._stop_sync(spec.id, reason=reason, shutdown=True)
+            if not self._stop_sync(spec.id, reason=reason, shutdown=True):
+                converged = False
+        return converged
 
-    async def shutdown_async(self, *, reason: str) -> None:
-        """不可逆关闭混合同步/异步 adapter 的 Runtime。"""
+    async def shutdown_async(self, *, reason: str) -> bool:
+        """不可逆关闭混合 Runtime，并返回全部 owner 是否收敛。"""
         with self._shutdown_lock:
             self._shutdown = True
+        converged = True
         for spec in self._registry.list_specs():
             adapter = self._adapters[spec.kind]
             if getattr(adapter, "execution_mode", None) is AdapterExecutionMode.ASYNC:
-                await self._stop_async(spec.id, reason=reason, shutdown=True)
+                stopped = await self._stop_async(spec.id, reason=reason, shutdown=True)
             else:
-                await anyio.to_thread.run_sync(
+                stopped = await anyio.to_thread.run_sync(
                     partial(self._stop_sync, spec.id, reason=reason, shutdown=True)
                 )
+            if not stopped:
+                converged = False
+        return converged
