@@ -34,6 +34,8 @@ from app.application.outbox import (
     SqlAlchemyAsyncOutboxStager,
     SqlAlchemyOutboxRepository,
     configure_outbox_dispatcher,
+    durable_event_topic,
+    validate_durable_event_handlers,
 )
 from app.application.security.auth import (
     AuthService,
@@ -296,44 +298,58 @@ def _dispatch_subscribe_complete_notification(message) -> None:
 
 def _build_outbox_dispatcher() -> OutboxDispatcher:
     """创建一次恢复批次独占的 Session、Repository 和事件 handler。"""
+    handlers = {
+        durable_event_topic(
+            EventType.SubscribeAdded
+        ): lambda message: EventManager().send_event(
+            EventType.SubscribeAdded,
+            message.payload,
+        ),
+        "subscribe.added.report": _dispatch_subscribe_added_report,
+        "subscribe.added.notification": _dispatch_subscribe_added_notification,
+        durable_event_topic(
+            EventType.SubscribeModified
+        ): lambda message: EventManager().send_event(
+            EventType.SubscribeModified,
+            message.payload,
+        ),
+        durable_event_topic(
+            EventType.SubscribeDeleted
+        ): lambda message: EventManager().send_event(
+            EventType.SubscribeDeleted,
+            message.payload,
+        ),
+        "subscribe.deleted.report": _dispatch_subscribe_deleted_report,
+        "subscribe.complete": lambda message: EventManager().send_event(
+            EventType.SubscribeComplete,
+            message.payload,
+        ),
+        "subscribe.complete.report": _dispatch_subscribe_complete_report,
+        "subscribe.complete.notification": _dispatch_subscribe_complete_notification,
+        durable_event_topic(
+            EventType.DownloadAdded
+        ): lambda message: EventManager().send_event(
+            EventType.DownloadAdded,
+            restore_download_added(message.payload),
+        ),
+        durable_event_topic(
+            EventType.TransferComplete
+        ): lambda message: EventManager().send_event(
+            EventType.TransferComplete,
+            restore_transfer_result(message.payload),
+        ),
+        durable_event_topic(
+            EventType.TransferFailed
+        ): lambda message: EventManager().send_event(
+            EventType.TransferFailed,
+            restore_transfer_result(message.payload),
+        ),
+    }
+    validate_durable_event_handlers(handlers)
     session = SessionFactory()
     return OutboxDispatcher(
         repository=SqlAlchemyOutboxRepository(session),
-        handlers={
-            "subscribe.added": lambda message: EventManager().send_event(
-                EventType.SubscribeAdded,
-                message.payload,
-            ),
-            "subscribe.added.report": _dispatch_subscribe_added_report,
-            "subscribe.added.notification": _dispatch_subscribe_added_notification,
-            "subscribe.modified": lambda message: EventManager().send_event(
-                EventType.SubscribeModified,
-                message.payload,
-            ),
-            "subscribe.deleted": lambda message: EventManager().send_event(
-                EventType.SubscribeDeleted,
-                message.payload,
-            ),
-            "subscribe.deleted.report": _dispatch_subscribe_deleted_report,
-            "subscribe.complete": lambda message: EventManager().send_event(
-                EventType.SubscribeComplete,
-                message.payload,
-            ),
-            "subscribe.complete.report": _dispatch_subscribe_complete_report,
-            "subscribe.complete.notification": _dispatch_subscribe_complete_notification,
-            "download.added": lambda message: EventManager().send_event(
-                EventType.DownloadAdded,
-                restore_download_added(message.payload),
-            ),
-            "transfer.completed": lambda message: EventManager().send_event(
-                EventType.TransferComplete,
-                restore_transfer_result(message.payload),
-            ),
-            "transfer.failed": lambda message: EventManager().send_event(
-                EventType.TransferFailed,
-                restore_transfer_result(message.payload),
-            ),
-        },
+        handlers=handlers,
         close=session.close,
         failure_observer=lambda dead: record_metric(
             "scheduler.job.dead_letter" if dead else "scheduler.job.retry",

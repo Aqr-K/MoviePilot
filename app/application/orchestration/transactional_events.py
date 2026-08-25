@@ -16,7 +16,12 @@ from app.application.orchestration.durable_events import (
     snapshot_transfer_result,
     transfer_result_event_key,
 )
-from app.application.outbox import DurableEventCommand, OutboxIntent, SqlAlchemyOutboxRepository
+from app.application.outbox import (
+    DOWNLOAD_ADDED_TOPIC,
+    DurableEventCommand,
+    OutboxIntent,
+    SqlAlchemyOutboxRepository,
+)
 from app.db.oper.downloadhistory import DownloadHistoryOper
 from app.db.oper.transferhistory import TransferHistoryOper
 from app.db.uow import SqlAlchemyUnitOfWork
@@ -87,7 +92,7 @@ class TransactionalChainDurableEventWriter(ChainDurableEventWriter):
             command.execute(
                 intent=OutboxIntent(
                     event_key=event_key,
-                    topic="download.added",
+                    topic=DOWNLOAD_ADDED_TOPIC,
                     payload=snapshot_download_added(event_payload),
                 ),
                 stage_business=stage_business,
