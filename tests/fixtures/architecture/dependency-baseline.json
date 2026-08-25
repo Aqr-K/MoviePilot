@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7069,
-  "edge_sha256": "a717b0b2d9690c6dbb34ea601fbb91c5e714b9efd45f93e88e6194d44c23e7e1",
+  "edge_count": 7072,
+  "edge_sha256": "e0bf53ccbccbc681c9513a215eb3999f4212b65218bf03d44ced6d6eb68f166c",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -132,6 +132,7 @@
     "app.adapters.external.market -> app.runtime.config",
     "app.adapters.external.market -> app.runtime.log",
     "app.adapters.external.market -> app.runtime.observability",
+    "app.adapters.external.market -> app.runtime.tasks",
     "app.adapters.external.ocr -> app.adapters",
     "app.adapters.external.ocr -> app.adapters.network",
     "app.adapters.external.ocr -> app.adapters.network.http",
@@ -342,6 +343,7 @@
     "app.agent.middleware.activity_log -> app.agent.tools.tags",
     "app.agent.middleware.activity_log -> app.runtime",
     "app.agent.middleware.activity_log -> app.runtime.log",
+    "app.agent.middleware.activity_log -> app.runtime.tasks",
     "app.agent.middleware.jobs -> app.agent",
     "app.agent.middleware.jobs -> app.agent.middleware",
     "app.agent.middleware.jobs -> app.agent.middleware.utils",
@@ -4399,6 +4401,7 @@
     "app.modules.fanart -> app.runtime.cache",
     "app.modules.fanart -> app.runtime.config",
     "app.modules.fanart -> app.runtime.log",
+    "app.modules.fanart -> app.runtime.tasks",
     "app.modules.fanart -> app.schemas",
     "app.modules.fanart -> app.schemas.types",
     "app.modules.feishu -> app.domain",
