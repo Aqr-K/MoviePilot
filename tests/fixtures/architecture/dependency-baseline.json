@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7101,
-  "edge_sha256": "c2f56231afac4053334cdc9fb069f10c66f043607ec80f90178975ea78a1b4b0",
+  "edge_count": 7102,
+  "edge_sha256": "3d10bfa9d093adc25e679370b89c0e335e4ea846338ab505baf3b269df34c30e",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -2994,6 +2994,7 @@
     "app.application.orchestration.message -> app.runtime",
     "app.application.orchestration.message -> app.runtime.config",
     "app.application.orchestration.message -> app.runtime.log",
+    "app.application.orchestration.message -> app.runtime.tasks",
     "app.application.orchestration.message -> app.schemas",
     "app.application.orchestration.message -> app.schemas.command",
     "app.application.orchestration.message -> app.schemas.message",
