@@ -549,6 +549,25 @@ def test_torrent_filter_contract_preserves_original_argument_list_merge() -> Non
     )
 
 
+def test_side_effect_hooks_use_non_short_circuiting_fan_out_contracts() -> None:
+    """副作用钩子必须执行全部 provider，不能被任意返回值提前截断。"""
+    methods = {
+        "clear_cache",
+        "download_added",
+        "music_cache_clear",
+        "register_commands",
+        "scheduler_job",
+        "tmdb_cache_clear",
+        "transfer_completed",
+    }
+
+    for method in methods:
+        contract = get_module_method_contract(method)
+        assert contract.aggregation is ModuleResultAggregation.FAN_OUT
+        assert contract.result_contract == "None"
+        assert contract.plugin_short_circuit is False
+
+
 def test_source_prefixed_legacy_methods_stay_unclassified() -> None:
     """预留的单来源实现细节方法名不得获得独立族契约，保持 legacy 回退。"""
     for method in (

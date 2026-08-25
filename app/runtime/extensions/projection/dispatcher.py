@@ -129,7 +129,7 @@ class ModuleInvocationDispatcher:
                     *args,
                     **kwargs,
                 )
-            if self._is_settled(result):
+            if self._is_settled(method, result):
                 break
         return result
 
@@ -151,7 +151,7 @@ class ModuleInvocationDispatcher:
                     *args,
                     **kwargs,
                 )
-            if self._is_settled(result):
+            if self._is_settled(method, result):
                 break
         return result
 
@@ -313,12 +313,15 @@ class ModuleInvocationDispatcher:
         contract = get_module_method_contract(method)
         logger.debug("模块方法契约：%s -> %s", method, contract.family)
 
-    def _is_settled(self, result: Any) -> bool:
+    def _is_settled(self, method: str, result: Any) -> bool:
         """判断接力结果是否已成为不可再合并的最终答案。
 
+        :param method: 模块方法名称
         :param result: 当前接力结果
-        :return: 结果非空且不是可继续合并的列表时为 True
+        :return: 契约允许短路、结果非空且不是可继续合并的列表时为 True
         """
+        if not get_module_method_contract(method).plugin_short_circuit:
+            return False
         return not self.is_valid_empty(result) and not isinstance(result, list)
 
     def _notify_providers(self, method: str) -> Iterator[ExtensionProvider]:
@@ -436,7 +439,7 @@ class ModuleInvocationDispatcher:
                 else:
                     provider_result = provider.invoke(*args, **kwargs)
                 self._diagnose_result(method, provider_result, provider)
-                result = self._aggregate_provider_result(result, provider_result, call_mode)
+                result = self._aggregate_provider_result(result, provider_result, call_mode, aggregation)
             except RateLimitExceededException as err:
                 self._report_rate_limit(provider, method, err, **kwargs)
             except Exception as err:
@@ -474,7 +477,7 @@ class ModuleInvocationDispatcher:
                 else:
                     provider_result = await self._async_call(provider.invoke, *args, **kwargs)
                 self._diagnose_result(method, provider_result, provider)
-                result = self._aggregate_provider_result(result, provider_result, call_mode)
+                result = self._aggregate_provider_result(result, provider_result, call_mode, aggregation)
             except RateLimitExceededException as err:
                 self._report_rate_limit(provider, method, err, **kwargs)
             except Exception as err:
@@ -495,6 +498,8 @@ class ModuleInvocationDispatcher:
         :param provider: 待决策的下一个提供者
         :return: 下一个提供者应采用的调用方式
         """
+        if aggregation is ModuleResultAggregation.FAN_OUT:
+            return _ProviderCallMode.ORIGINAL
         if cls.is_valid_empty(result):
             return _ProviderCallMode.ORIGINAL
         if aggregation is ModuleResultAggregation.FIRST_NON_EMPTY:
@@ -525,14 +530,18 @@ class ModuleInvocationDispatcher:
         result: Any,
         provider_result: Any,
         call_mode: _ProviderCallMode,
+        aggregation: ModuleResultAggregation,
     ) -> Any:
         """合并单个 provider 结果，接力调用则用新结果替换旧结果。
 
         :param result: 上一阶段的接力结果
         :param provider_result: 本次 provider 调用产出
         :param call_mode: 本次调用采用的方式
+        :param aggregation: 方法契约声明的聚合策略
         :return: 合并后的接力结果
         """
+        if aggregation is ModuleResultAggregation.FAN_OUT:
+            return result
         if call_mode is _ProviderCallMode.RELAY:
             return provider_result
         if isinstance(result, list) and isinstance(provider_result, list):
