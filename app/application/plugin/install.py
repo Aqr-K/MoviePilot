@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from app.application.plugin.lifecycle import plugin_lifecycle
+from app.runtime.execution import await_task_to_terminal
 from app.runtime.log import logger
 
 InstalledPluginsReader = Callable[[], list[str]]
@@ -23,23 +24,6 @@ PackageCheckpointAction = Callable[[Any], Awaitable[object]]
 InstallReporter = Callable[[str, Optional[str]], Awaitable[object]]
 PluginReloader = Callable[[str], Awaitable[object]]
 PluginRegistrationRefresher = Callable[[str], Awaitable[object]]
-
-
-async def _await_task_to_terminal(task: "asyncio.Task[Any]") -> Any:
-    """忽略调用方的重复取消，直到受屏蔽子任务进入真实终态。
-
-    参数：
-        task：已用 asyncio.shield 屏蔽外部取消的子任务。
-    返回：
-        子任务的最终结果。
-    """
-    while not task.done():
-        try:
-            return await asyncio.shield(task)
-        except asyncio.CancelledError:
-            continue
-    return task.result()
-
 
 @dataclass(frozen=True, slots=True)
 class PluginInstallRollback:
@@ -181,7 +165,7 @@ class PluginInstallCommand:
             state.checkpoint = checkpoint
         except asyncio.CancelledError:
             try:
-                state.checkpoint = await _await_task_to_terminal(checkpoint_task)
+                state.checkpoint = await await_task_to_terminal(checkpoint_task)
             except BaseException:
                 pass
             raise
@@ -345,7 +329,7 @@ class PluginInstallCommand:
             )
         )
         try:
-            result = await _await_task_to_terminal(rollback_task)
+            result = await await_task_to_terminal(rollback_task)
         except BaseException as err:
             logger.error(f"插件 {plugin_id} 取消后的补偿失败：{err}")
             return
@@ -386,12 +370,7 @@ class PluginInstallCommand:
             cleanup_task = asyncio.create_task(
                 self._restore_refreshed_runtime(plugin_id)
             )
-            while not cleanup_task.done():
-                try:
-                    await asyncio.shield(cleanup_task)
-                except asyncio.CancelledError:
-                    continue
-            rollback = await cleanup_task
+            rollback = await await_task_to_terminal(cleanup_task)
             state.refresh_compensated = True
             if rollback.errors:
                 logger.error(
