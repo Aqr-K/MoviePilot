@@ -12,6 +12,9 @@ from typing import Optional
 
 from app.adapters.external.market import PluginHelper as _PluginHelper
 from app.runtime.config import settings
+from app.runtime.execution import (
+    run_in_threadpool_to_completion as _await_thread_operation,
+)
 from app.runtime.log import logger
 
 # 插件已装版本元信息文件名，位于插件目录下，源码下沉到版本目录时原地保留
@@ -43,20 +46,6 @@ def _allow_coexistence(
 def _unresolved_version_name(_dir_name: str) -> Optional[str]:
     """版本布局服务尚未装配时反解不出版本号。"""
     return None
-
-
-async def _await_thread_operation(func, *args, **kwargs):
-    """取消请求到达时先等待文件操作收口，避免后台线程继续写运行目录。"""
-    task = asyncio.create_task(asyncio.to_thread(func, *args, **kwargs))
-    try:
-        return await asyncio.shield(task)
-    except asyncio.CancelledError:
-        try:
-            await asyncio.shield(task)
-        except BaseException:
-            pass
-        raise
-
 
 @dataclass(frozen=True, slots=True)
 class PluginPackageCheckpoint:
