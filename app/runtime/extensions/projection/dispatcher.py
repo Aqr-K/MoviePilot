@@ -505,6 +505,12 @@ class ModuleInvocationDispatcher:
                 if isinstance(result, list)
                 else _ProviderCallMode.STOP
             )
+        if aggregation is ModuleResultAggregation.ORDERED_MAPPING_MERGE:
+            return (
+                _ProviderCallMode.ORIGINAL
+                if isinstance(result, dict)
+                else _ProviderCallMode.STOP
+            )
         if provider.relays_result and ObjectUtils.check_signature(
             provider.invoke,
             result,
@@ -527,10 +533,14 @@ class ModuleInvocationDispatcher:
         :param call_mode: 本次调用采用的方式
         :return: 合并后的接力结果
         """
-        if call_mode is _ProviderCallMode.RELAY or not isinstance(result, list):
+        if call_mode is _ProviderCallMode.RELAY:
             return provider_result
-        if isinstance(provider_result, list):
+        if isinstance(result, list) and isinstance(provider_result, list):
             result.extend(provider_result)
+        elif isinstance(result, dict) and isinstance(provider_result, dict):
+            result.update(provider_result)
+        elif not isinstance(result, (list, dict)):
+            return provider_result
         return result
 
     @staticmethod
