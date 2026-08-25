@@ -24,6 +24,7 @@ from app.application.workflow import (
     WorkflowDefinitionCommand,
     WorkflowMutationCommand,
     WorkflowQueryService,
+    get_workflow_manager,
 )
 from app.application.messaging.message import MessageQueryService
 from app.application.messaging.chat import AgentChatService
@@ -66,7 +67,6 @@ from app.application.site.sites import SitesHelper  # pylint: disable=import-err
 from app.domain import site as site_rules
 from app.foundation import url as url_tools
 from app.runtime.config import global_vars
-from app.workflow import WorkFlowManager
 from app.application.orchestration.storage import StorageChain
 from app.schemas.workflow import FileItem as _SchemaFileItem
 
@@ -304,7 +304,7 @@ def get_workflow_mutation_command(
 ) -> WorkflowMutationCommand:
     """组装请求级工作流写用例和提交后的调度副作用。"""
     scheduler = Scheduler()
-    workflow_manager = WorkFlowManager()
+    workflow_manager = get_workflow_manager()
     return WorkflowMutationCommand(
         repository=_repository("workflow", db),
         unit_of_work=_transaction("sync", db),

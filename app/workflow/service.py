@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from app.runtime.config import global_vars
 from app.runtime.events import Event, eventmanager
 from app.application.orchestration.data import WorkflowPortProxy as WorkflowOper
+from app.application.workflow import get_workflow_manager
 from app.runtime.log import logger
 from app.schemas.workflow import ActionContext
 from app.schemas.workflow import ActionFlow
@@ -24,7 +25,6 @@ from app.schemas.workflow import Action
 from app.schemas.workflow import ActionExecution
 from app.schemas.workflow import ActionResult
 from app.schemas.types import EventType
-from app.workflow import WorkFlowManager
 
 ARTIFACT_FIELDS = {"torrents", "medias", "fileitems", "downloads", "sites", "subscribes"}
 DEFAULT_WORKFLOW_MAX_WORKERS = 4
@@ -161,7 +161,7 @@ class WorkflowExecutor:
         self.flow_failed = set()
 
         # 工作流管理器
-        self.workflowmanager = WorkFlowManager()
+        self.workflowmanager = get_workflow_manager()
         # 线程安全队列
         self.queue = deque()
         self.queued_actions = set()

@@ -982,6 +982,36 @@ def test_runtime_consumers_use_command_application_facade():
     assert violations == {}
 
 
+def test_runtime_consumers_use_workflow_application_facade():
+    """WorkFlowManager concrete 实现只允许 startup 组合根直接依赖。
+
+    app.workflow 包内同时含 Singleton 管理器（__init__.py）与广泛复用的
+    WorkflowChain（service.py，app/chain/workflow.py 的落点），按包前缀判违
+    （见 _resolve_imports 的祖先包计入规则）会把合法的 WorkflowChain 引用也
+    记成 app.workflow 依赖，因此改用 AST 精确匹配 WorkFlowManager 符号本身。
+    """
+    allowed = {"app.startup.workflow_initializer"}
+    violations: list[str] = []
+    for path in sorted(APP_ROOT.rglob("*.py")):
+        if path.parts[len(APP_ROOT.parts)] == "plugins":
+            continue
+        relative = path.relative_to(PROJECT_ROOT).with_suffix("")
+        parts = list(relative.parts)
+        if parts[-1] == "__init__":
+            parts.pop()
+        module_name = ".".join(parts)
+        if module_name.startswith("app.workflow") or module_name in allowed:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.module != "app.workflow":
+                continue
+            if any(alias.name == "WorkFlowManager" for alias in node.names):
+                violations.append(f"{module_name}:{node.lineno}")
+
+    assert violations == []
+
+
 def test_api_does_not_import_factory():
     """装配器（factory）只允许 app.main 使用，HTTP 端点不得回引。"""
     violations: dict[str, set[str]] = {}
