@@ -517,6 +517,38 @@ def test_lookup_contracts_separate_value_routes_from_list_aggregation() -> None:
         assert contract.result_contract
 
 
+def test_recognition_match_and_cache_contracts_share_sync_async_semantics() -> None:
+    """媒体匹配与缓存回填的同步、异步入口必须复用同一目标路由契约语义。"""
+    pairs = {
+        "match_doubaninfo": "async_match_doubaninfo",
+        "match_tmdbinfo": "async_match_tmdbinfo",
+        "update_recognize_cache": "async_update_recognize_cache",
+    }
+
+    for sync_method, async_method in pairs.items():
+        sync_contract = get_module_method_contract(sync_method)
+        async_contract = get_module_method_contract(async_method)
+        assert async_contract.aggregation is sync_contract.aggregation
+        assert async_contract.required_parameters == sync_contract.required_parameters
+        assert sync_contract.family == "media-recognition"
+        assert sync_contract.aggregation is ModuleResultAggregation.FIRST_NON_EMPTY
+        assert sync_contract.required_parameters
+
+
+def test_torrent_filter_contract_preserves_original_argument_list_merge() -> None:
+    """种子过滤 provider 应接收原始参数并有序合并结果，不得误用单参数接力。"""
+    contract = get_module_method_contract("filter_torrents")
+
+    assert contract.family == "downloader"
+    assert contract.aggregation is ModuleResultAggregation.ORDERED_LIST_MERGE
+    assert contract.result_shape is ModuleResultShape.LIST
+    assert contract.required_parameters == (
+        "rule_groups",
+        "torrent_list",
+        "mediainfo",
+    )
+
+
 def test_source_prefixed_legacy_methods_stay_unclassified() -> None:
     """预留的单来源实现细节方法名不得获得独立族契约，保持 legacy 回退。"""
     for method in (
