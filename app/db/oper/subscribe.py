@@ -316,8 +316,8 @@ class SubscribeOper(DbOper):
         )
 
     async def get_candidate(
-            self,
-            subscribe_id: int,
+        self,
+        subscribe_id: int,
     ) -> Optional[dict]:
         """
         读取一条订阅的持久化身份快照。
@@ -326,6 +326,23 @@ class SubscribeOper(DbOper):
         :return: 见 :func:`_identity_row`；订阅不存在时为 None
         """
         subscribe = await self.async_get(subscribe_id)
+        return self._deletion_candidate(subscribe)
+
+    def get_candidate_sync(
+        self,
+        subscribe_id: int,
+    ) -> Optional[dict]:
+        """
+        同步读取一条订阅的持久化身份快照。
+
+        :param subscribe_id: 订阅 ID
+        :return: 见 :func:`_identity_row`；订阅不存在时为 None
+        """
+        return self._deletion_candidate(self.get(subscribe_id))
+
+    @staticmethod
+    def _deletion_candidate(subscribe: Optional[Subscribe]) -> Optional[dict]:
+        """把 ORM 行投影为同步和异步删除命令共用的持久化身份快照。"""
         if not subscribe:
             return None
         return _identity_row(subscribe)
@@ -474,6 +491,12 @@ class SubscribeOper(DbOper):
         await self._db.execute(
             sqlalchemy_delete(Subscribe).where(Subscribe.id == sid)
         )
+
+    def stage_delete_sync(self, sid: int) -> None:
+        """同步登记订阅删除但不提交，由 Application UnitOfWork 控制事务边界。"""
+        if not isinstance(self._db, Session):
+            raise RuntimeError("同步订阅删除需要调用方提供 Session")
+        self._db.execute(sqlalchemy_delete(Subscribe).where(Subscribe.id == sid))
 
     async def async_update(self, sid: int, payload: dict) -> Optional[Subscribe]:
         """
