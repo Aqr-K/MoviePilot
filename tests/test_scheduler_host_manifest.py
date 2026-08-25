@@ -70,9 +70,9 @@ def fixture_stub_business_domains(monkeypatch):
     ]:
         monkeypatch.setattr(manifest_module, name, Mock())
     monkeypatch.setattr(
-        manifest_module.ServiceConfigHelper,
+        manifest_module,
         "get_mediaserver_configs",
-        lambda: [],
+        lambda **_kwargs: [],
     )
     monkeypatch.setattr(manifest_module.settings, "SUBSCRIBE_MODE", "rss")
     monkeypatch.setattr(manifest_module.settings, "SUBSCRIBE_RSS_INTERVAL", 30)

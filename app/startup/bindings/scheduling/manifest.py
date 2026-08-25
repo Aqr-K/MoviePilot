@@ -17,11 +17,11 @@ from app.application.orchestration.mediaserver import MediaServerChain
 from app.application.orchestration.recommend import RecommendChain
 from app.application.orchestration.scheduler import SchedulerChain
 from app.application.orchestration.site import SiteChain
+from app.application.mediaserver import get_mediaserver_configs
 from app.application.orchestration.subscribe import SubscribeChain
 from app.application.orchestration.transfer import TransferChain
 from app.runtime.config import settings
 from app.runtime.extensions.plugin_manager import PluginManager
-from app.runtime.extensions.service_config import ServiceConfigHelper
 from app.runtime.scheduler import ScheduledJob, ScheduledTrigger
 from app.runtime.scheduling import TimerUtils
 from app.schemas.system import MediaServerConf
@@ -205,7 +205,7 @@ def _mediaserver_jobs(sync: Callable[..., object]) -> List[ScheduledJob]:
             ),
         )
         for schedule in build_mediaserver_sync_schedules(
-            mediaservers=ServiceConfigHelper.get_mediaserver_configs(),
+            mediaservers=get_mediaserver_configs(include_disabled=True),
             default_interval=settings.MEDIASERVER_SYNC_INTERVAL,
         )
     ]

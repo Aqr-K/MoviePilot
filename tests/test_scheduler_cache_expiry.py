@@ -93,9 +93,9 @@ def test_clear_cache_is_manual_only(monkeypatch):
         monkeypatch.setattr(manifest_module, name, lambda: generic_chain)
     monkeypatch.setattr(workflows_module, "WorkflowChain", lambda: generic_chain)
     monkeypatch.setattr(
-        manifest_module.ServiceConfigHelper,
+        manifest_module,
         "get_mediaserver_configs",
-        lambda: [],
+        lambda **_kwargs: [],
     )
     monkeypatch.setattr(
         scheduler_module,

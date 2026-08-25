@@ -481,6 +481,9 @@ SDK_HOST_INTERNAL_EXPORTS = {
     'app.adapters.network.http.aclose_shared_async_transports': '关闭宿主共享异步连接池，属应用关停流程',
     'app.adapters.network.http.configure_default_user_agent': '设置宿主全局默认 User-Agent',
     'app.adapters.network.http.get_caller': '回溯宿主调用栈以标注请求来源',
+    'app.application.mediaserver.get_mediaserver_configs': '读取宿主媒体服务器配置目录，供调度清单与内部 Agent 工具装配调用',
+    'app.application.notification.get_notification_configs': '读取宿主通知渠道配置目录，供 API 端点与内部 Agent 工具装配调用',
+    'app.application.notification.get_notification_switch': '读取宿主通知场景目标范围，属内部消息编排装配',
     'app.domain.context.configure_tmdb_image_url_builder': '装配宿主 TMDB 图片地址构造器',
     'app.domain.meta.customization.configure_customization_provider': '装配宿主自定义识别词提供者',
     'app.domain.meta.releasegroup.configure_release_groups_provider': '装配宿主自定义制作组提供者',
@@ -493,6 +496,7 @@ SDK_HOST_INTERNAL_EXPORTS = {
     'app.runtime.extensions.plugin_manager.configure_plugin_legacy_import_services': '装配宿主旧导入诊断服务',
     'app.runtime.extensions.plugin_manager.configure_plugin_resource_import_preparer': '装配宿主插件资源导入准备器',
     'app.runtime.extensions.plugin_manager.configure_site_auth_level_provider': '装配宿主站点认证级别提供者',
+    'app.runtime.extensions.service_registry.get_service_configs': '服务配置目录的无过滤读取入口，供 ServiceBaseHelper 内部复用',
 }
 
 SDK_PLUGIN_BASE_SURFACE = {

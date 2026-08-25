@@ -15,7 +15,13 @@ TConf = TypeVar("TConf")
 __all__ = [
     "ServiceBaseHelper",
     "ServiceConfigHelper",
+    "get_service_configs",
 ]
+
+
+def get_service_configs(config_key: SystemConfigKey, conf_type: Type[TConf]) -> List[TConf]:
+    """返回指定服务配置键下已通过结构校验的原始配置列表，不做启用态过滤。"""
+    return ServiceConfigHelper.get_configs(config_key, conf_type)
 
 
 class ServiceBaseHelper(Generic[TConf]):
@@ -73,7 +79,7 @@ class ServiceBaseHelper(Generic[TConf]):
         :param include_disabled: 是否包含禁用的配置，默认 False（仅返回启用的配置）
         :return: 配置字典
         """
-        configs: List[TConf] = ServiceConfigHelper.get_configs(self.config_key, self.conf_type)
+        configs: List[TConf] = get_service_configs(self.config_key, self.conf_type)
         return {
             config.name: config
             for config in configs

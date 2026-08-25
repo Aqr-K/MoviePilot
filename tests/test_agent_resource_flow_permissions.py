@@ -452,7 +452,7 @@ def test_channel_primary_id_defaults_to_admin_without_admin_list():
     )
 
     with patch(
-        "app.agent.tools.base.ServiceConfigHelper.get_notification_configs",
+        "app.agent.tools.base.get_notification_configs",
         return_value=[
             SimpleNamespace(
                 name="telegram-main",
@@ -475,7 +475,7 @@ def test_channel_primary_id_mismatch_remains_non_admin():
     )
 
     with patch(
-        "app.agent.tools.base.ServiceConfigHelper.get_notification_configs",
+        "app.agent.tools.base.get_notification_configs",
         return_value=[
             SimpleNamespace(
                 name="telegram-main",
@@ -498,7 +498,7 @@ def test_feishu_primary_open_id_defaults_to_admin():
     )
 
     with patch(
-        "app.agent.tools.base.ServiceConfigHelper.get_notification_configs",
+        "app.agent.tools.base.get_notification_configs",
         return_value=[
             SimpleNamespace(
                 name="feishu-main",
@@ -521,7 +521,7 @@ def test_channel_primary_id_still_prefers_admin_list():
     )
 
     with patch(
-        "app.agent.tools.base.ServiceConfigHelper.get_notification_configs",
+        "app.agent.tools.base.get_notification_configs",
         return_value=[
             SimpleNamespace(
                 name="telegram-main",

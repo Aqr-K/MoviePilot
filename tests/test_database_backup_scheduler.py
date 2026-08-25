@@ -13,9 +13,9 @@ from app.startup.bindings.scheduling import systemjobs as systemjobs_module
 def _backup_jobs(monkeypatch) -> list:
     """构建宿主作业清单并取出数据库备份作业。"""
     monkeypatch.setattr(
-        manifest_module.ServiceConfigHelper,
+        manifest_module,
         "get_mediaserver_configs",
-        lambda: [],
+        lambda **_kwargs: [],
     )
     for name in [
         "MediaServerChain",

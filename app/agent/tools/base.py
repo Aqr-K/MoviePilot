@@ -21,7 +21,7 @@ from app.agent.tools.tags import ToolTag
 from app.application.orchestration import ChainBase
 from app.runtime.config import settings
 from app.application.messaging.agent import matches_channel_admin
-from app.runtime.extensions.service_config import ServiceConfigHelper
+from app.application.notification import get_notification_configs
 from app.runtime.log import logger
 from app.schemas.message import Message
 from app.schemas.notification import resolve_channel
@@ -626,7 +626,7 @@ class MoviePilotTool(BaseTool, metaclass=ABCMeta):
             return False
 
         try:
-            configs = ServiceConfigHelper.get_notification_configs()
+            configs = get_notification_configs(include_disabled=True)
             for config in configs:
                 if config.name == self._source and config.config:
                     return matches_channel_admin(

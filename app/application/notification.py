@@ -1,9 +1,9 @@
 from typing import Optional
 
-from app.runtime.extensions.service_registry import ServiceBaseHelper
-from app.schemas.system import NotificationConf
+from app.runtime.extensions.service_registry import ServiceBaseHelper, get_service_configs
+from app.schemas.system import NotificationConf, NotificationSwitchConf
 from app.schemas.system import ServiceInfo
-from app.schemas.types import SystemConfigKey
+from app.schemas.types import MessageType, SystemConfigKey
 
 
 class NotificationHelper(ServiceBaseHelper[NotificationConf]):
@@ -32,3 +32,23 @@ class NotificationHelper(ServiceBaseHelper[NotificationConf]):
         """
         service = service or self.get_service(name=name)
         return bool(service and service.type == service_type)
+
+
+def get_notification_configs(
+    include_disabled: bool = False,
+) -> list[NotificationConf]:
+    """返回通知配置列表，并按调用方需要决定是否包含禁用项。"""
+    return list(
+        NotificationHelper().get_configs(include_disabled=include_disabled).values()
+    )
+
+
+def get_notification_switch(mtype: MessageType) -> Optional[str]:
+    """返回指定通知场景的目标范围。"""
+    for switch in get_service_configs(
+        SystemConfigKey.NotificationSwitchs,
+        NotificationSwitchConf,
+    ):
+        if switch.type == mtype.value:
+            return switch.action
+    return None
