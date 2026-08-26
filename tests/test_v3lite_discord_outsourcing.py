@@ -340,11 +340,11 @@ def test_unknown_channel_value_degrades_to_identity_string() -> None:
 
 
 def test_channel_name_attribute_access_breaks_for_extension_channel() -> None:
-    """固定风险点：以 `channel.name` 取渠道名的调用方对字符串渠道会抛 AttributeError。
+    """固定约束：扩展渠道标识是字符串，没有 ``name`` 属性。
 
-    `app/application/orchestration/interaction.py` 的两处 ``channel.name.lower()``
-    只用 ``if channel`` 做真值守卫，非空字符串渠道同样为真，因此枚举成员被移除后
-    这两处会抛 `AttributeError` 而不是降级。
+    归一函数对命不中内建索引的标识原样交出字符串，因此 ``if channel`` 这类真值
+    守卫拦不住它——非空字符串同样为真。取渠道名必须先归一到 `NotificationChannel`
+    再读 ``name``，直接读会抛 `AttributeError`。
     """
     channel = resolve_channel("v3lite-removed-member")
 

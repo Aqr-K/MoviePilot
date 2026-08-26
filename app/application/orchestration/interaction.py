@@ -26,7 +26,7 @@ from app.schemas.file import FileURI
 from app.schemas.mediaserver import NotExistMediaInfo
 from app.schemas.message import Message
 from app.schemas.media import build_media_key, resolve_media_identity
-from app.schemas.notification import ChannelCapabilityManager
+from app.schemas.notification import ChannelCapabilityManager, ChannelRef, resolve_channel
 from app.schemas.system import TransferDirectoryConf
 from app.schemas.types import MediaType, NotificationChannel
 
@@ -46,6 +46,22 @@ class MediaInteractionChain(ChainBase):
         判断用户当前是否存在未结束的媒体交互。
         """
         return media_interaction_manager.get_by_user(user_id) is not None
+
+    @staticmethod
+    def _resolve_channel_username(
+            channel: Optional[ChannelRef], userid: Union[str, int]
+    ) -> Optional[str]:
+        """
+        按渠道与用户 ID 查询绑定的系统用户名。
+
+        :param channel: 渠道枚举成员、枚举取值、枚举成员名或扩展渠道标识
+        :param userid: 渠道内的用户 ID
+        :return: 内建渠道命中绑定关系时为系统用户名；扩展渠道或未命中时为 None
+        """
+        resolved = resolve_channel(channel)
+        if not isinstance(resolved, NotificationChannel):
+            return None
+        return get_chain_user_port().get_name(**{f"{resolved.name.lower()}_userid": userid})
 
     @staticmethod
     def _get_noexits_info(
@@ -669,11 +685,7 @@ class MediaInteractionChain(ChainBase):
                 )
                 return
 
-        mp_name = (
-            get_chain_user_port().get_name(**{f"{channel.name.lower()}_userid": userid})
-            if channel
-            else None
-        )
+        mp_name = self._resolve_channel_username(channel, userid)
         SubscribeChain().add(
             title=mediainfo.title,
             year=mediainfo.year,
@@ -980,11 +992,7 @@ class MediaInteractionChain(ChainBase):
         else:
             note = None
 
-        mp_name = (
-            get_chain_user_port().get_name(**{f"{channel.name.lower()}_userid": userid})
-            if channel
-            else None
-        )
+        mp_name = self._resolve_channel_username(channel, userid)
         SubscribeChain().add(
             title=request.current_media.title,
             year=request.current_media.year,
