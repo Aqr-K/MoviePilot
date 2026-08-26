@@ -439,6 +439,11 @@ class _PluginBase(metaclass=ABCMeta):
         同一实例的方法名若被多条来源同时挂载，优先级从低到高为 get_module()、本钩子、
         `provides_media_sources()`，高优先级的实现生效。
 
+        ``ModuleDeclaration.priority`` 声明的是同一方法名有多个提供者时的排序位，
+        数值越小优先级越高，语义与内建模块相同；当前宿主尚未把这条排序接入插件声明
+        的方法表分发，多个插件挂载同一方法名时的接力顺序仍由登记先后决定，声明
+        priority 目前不影响调用结果。
+
         :return: `ModuleDeclaration` 列表；插件不提供模块方法表时无需实现
         """
         pass

@@ -6,7 +6,10 @@ from typing import Iterator
 import pytest
 
 from app.runtime.deprecation import policy as deprecation_policy
-from app.runtime.extensions.contract.declaration import ModuleDeclaration
+from app.runtime.extensions.contract.declaration import (
+    ModuleDeclaration,
+    declaration_module_priority,
+)
 from app.runtime.extensions.projection.dispatcher import ModuleInvocationDispatcher
 from app.runtime.extensions.admission import module
 from app.runtime.extensions.projection import plugin as projection_module
@@ -136,6 +139,67 @@ def test_contract_rejects_non_callable_method_value() -> None:
 
 
 # ---------------------------------------------------------------------------
+# priority 字段
+# ---------------------------------------------------------------------------
+
+
+def test_priority_defaults_to_zero() -> None:
+    """未显式声明 priority 时默认为 0，与内建模块最常见的中性取值一致。"""
+    declaration = ModuleDeclaration(methods={"recognize": _handler})
+
+    assert declaration.priority == 0
+
+
+def test_priority_explicit_value_is_preserved() -> None:
+    """显式声明的 priority 原样保留，不被归一或改写。"""
+    declaration = ModuleDeclaration(methods={"recognize": _handler}, priority=7)
+
+    assert declaration.priority == 7
+
+
+def test_declaration_module_priority_reads_module_declaration() -> None:
+    """`declaration_module_priority` 从 ModuleDeclaration 实例读出 priority 原始值。"""
+    declaration = ModuleDeclaration(methods={"recognize": _handler}, priority=3)
+
+    assert declaration_module_priority(declaration) == 3
+
+
+def test_declaration_module_priority_missing_on_bare_dict_is_none() -> None:
+    """插件直接交出方法表字典时没有 priority 字段，读取结果为 None 而非 0。"""
+    assert declaration_module_priority({"recognize": _handler}) is None
+
+
+def test_contract_accepts_explicit_integer_priority() -> None:
+    """priority 为整数时声明合规。"""
+    declaration = ModuleDeclaration(methods={"recognize": _handler}, priority=5)
+
+    assert module.module_declaration_violation(declaration) is None
+
+
+def test_contract_accepts_bare_dict_without_priority_field() -> None:
+    """兼容旧写法：方法表字典没有 priority 字段时仍视为合规，缺省即不参与排序。"""
+    assert module.module_declaration_violation({"recognize": _handler}) is None
+
+
+def test_contract_rejects_non_integer_priority() -> None:
+    """priority 给出但不是整数时声明必须被拒绝。"""
+    declaration = ModuleDeclaration(methods={"recognize": _handler}, priority="high")
+
+    violation = module.module_declaration_violation(declaration)
+
+    assert violation is not None
+
+
+def test_contract_rejects_boolean_priority() -> None:
+    """priority 给出 bool 时必须被拒绝：bool 是 int 子类，不能被当成合法排序位。"""
+    declaration = ModuleDeclaration(methods={"recognize": _handler}, priority=True)
+
+    violation = module.module_declaration_violation(declaration)
+
+    assert violation is not None
+
+
+# ---------------------------------------------------------------------------
 # PluginProjection.provided_modules() / modules() 投影
 # ---------------------------------------------------------------------------
 
@@ -154,6 +218,25 @@ def test_projection_accepts_valid_declaration() -> None:
     assert len(declared["DemoModule"]) == 1
     accepted = declared["DemoModule"][0]
     assert accepted.methods == {"recognize": _handler}
+
+
+def test_projection_preserves_priority_field() -> None:
+    """provided_modules() 投影产出的是原始声明对象，priority 字段随之原样保留。
+
+    modules() 之后的合并步骤把多条声明拍平成一张 {方法名: 实现} 表，priority 只在
+    provided_modules() 这一层的声明对象上还看得到；这正是当前投影层「正确携带」
+    该字段的方式，而不是在拍平后的方法表里发明一个新位置存放它。
+    """
+    plugin = _CapableModulePlugin(
+        declarations=[
+            ModuleDeclaration(methods={"recognize": _handler}, priority=9)
+        ]
+    )
+    projection = PluginProjection({"DemoModule": plugin})
+
+    declared = projection.provided_modules()
+
+    assert declared["DemoModule"][0].priority == 9
 
 
 def test_projection_accepts_bare_dict_without_wrapper() -> None:
@@ -390,3 +473,30 @@ def test_provider_source_yields_declared_provider_for_matching_method() -> None:
     assert len(providers) == 1
     assert providers[0].extension_id == "DemoModule"
     assert providers[0].invoke() == "ok"
+
+
+def test_plugin_priority_does_not_yet_govern_dispatch_order() -> None:
+    """记录当前事实：插件声明的 priority 尚未接入分发排序。
+
+    `PluginProviderSource._providers()` 按目录字典的登记顺序产出提供者，不读取
+    `ModuleDeclaration.priority`；与之相对，宿主内建模块目录
+    （`app.runtime.extensions.module_manager.ModuleManager.providers_for`）确实按
+    `get_priority()` 升序排列。本用例把「数值更小、优先级更高」的声明放在后登记的
+    插件上，验证 unicast 仍然应答先登记的插件而不是优先级更高的插件——排序逻辑
+    需在模块外挂阶段一并设计，当前不能假定它已经生效。
+    """
+    later_but_higher_priority = _CapableModulePlugin(
+        declarations=[ModuleDeclaration(methods={"recognize": lambda: "second"}, priority=0)]
+    )
+    later_but_higher_priority.plugin_name = "后登记但优先级更高"
+    earlier_but_lower_priority = _CapableModulePlugin(
+        declarations=[ModuleDeclaration(methods={"recognize": lambda: "first"}, priority=99)]
+    )
+    earlier_but_lower_priority.plugin_name = "先登记但优先级更低"
+    projection = PluginProjection({
+        "Earlier": earlier_but_lower_priority,
+        "Later": later_but_higher_priority,
+    })
+    dispatcher = _dispatcher(projection)
+
+    assert dispatcher.unicast("recognize") == "first"

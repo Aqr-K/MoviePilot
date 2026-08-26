@@ -14,7 +14,10 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional
 
-from app.runtime.extensions.contract.declaration import declaration_methods
+from app.runtime.extensions.contract.declaration import (
+    declaration_methods,
+    declaration_module_priority,
+)
 
 
 def method_table_violation(methods: Any, *, field: str = "methods") -> Optional[str]:
@@ -43,14 +46,22 @@ def module_declaration_violation(declaration: Any) -> Optional[str]:
     """
     校验模块声明是否满足登记契约
 
-    契约要求方法表是非空映射、键均为非空字符串、值均可调用。三项中任一不满足都
-    拒绝登记，不留到调用时才失败。声明提供的能力面即方法表的键，不另行声明。
+    契约要求方法表是非空映射、键均为非空字符串、值均可调用；``priority`` 给出时须是
+    整数。任一不满足都拒绝登记，不留到调用时才失败。声明提供的能力面即方法表的键，
+    不另行声明；``priority`` 缺失（含插件直接交出方法表字典的兼容写法）视为未声明
+    排序偏好，不判违约。
 
     :param declaration: `ModuleDeclaration` 实例，或插件直接交出的方法表字典
     :return: 违反契约的描述；声明合规时为 None
     """
     try:
         methods = declaration_methods(declaration)
+        priority = declaration_module_priority(declaration)
     except Exception as error:
         return f"读取模块声明出错：{error}"
-    return method_table_violation(methods)
+    violation = method_table_violation(methods)
+    if violation:
+        return violation
+    if priority is not None and (isinstance(priority, bool) or not isinstance(priority, int)):
+        return f"priority {priority!r} 不是整数，无法作为分发排序依据"
+    return None

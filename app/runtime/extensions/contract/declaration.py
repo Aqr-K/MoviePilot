@@ -92,10 +92,22 @@ class ModuleDeclaration(ExtensionDeclaration):
     `ServiceInstanceDeclaration` 承担——两者混在一条声明里会让「提供一批方法」与
     「提供一族可配置实例」共用同一个入口，而宿主对二者的装载路径本就不同。
 
+    ``priority`` 回答「同一方法名有多个提供者时如何排序」：数值越小优先级越高，只在
+    同一方法名有多个提供者时才生效，语义与内建模块 manifest 里 ``metadata.priority``
+    一致——后者由 `app.runtime.extensions.module_manager.ModuleManager.providers_for`
+    消费，按此值把同名方法的多个内建提供者升序排列。当前只有内建模块目录接入了这条
+    排序路径；插件声明的方法表走 `app.runtime.extensions.projection.plugin
+    .PluginProviderSource`，尚未按 ``priority`` 排序——多个插件挂载同一方法名时，
+    接力顺序仍由登记先后决定。本字段先落在声明上，为内建模块外挂为插件时携带同一份
+    仲裁语义，不代表当前调用即按此排序。
+
     :param methods: 方法名到可调用对象的映射，跨进程时退化为方法名清单
+    :param priority: 同一方法名有多个提供者时的分发排序位，数值越小优先级越高；
+        默认 0，与内建模块 manifest 里最常见的中性取值一致
     """
 
     methods: Mapping[str, Any] = MappingProxyType({})
+    priority: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -527,6 +539,21 @@ def declaration_methods(declaration: Any) -> Optional[Mapping[str, Any]]:
         return declaration
     methods = getattr(declaration, "methods", None)
     return methods if isinstance(methods, Mapping) else None
+
+
+def declaration_module_priority(declaration: Any) -> Any:
+    """
+    读取模块声明自报的分发排序位原始值
+
+    按原值返回而不归一为整数：取值合法性由契约校验判定，此处先归一会把非整数的
+    错误取值悄悄变成一个合法答案。插件直接交出方法表字典而不包 `ModuleDeclaration`
+    的兼容写法没有这个字段，字段缺失与显式给出 None 都答 None，两者对宿主是同一件
+    事——都视为未声明排序偏好。
+
+    :param declaration: `ModuleDeclaration` 实例，或插件直接交出的方法表字典
+    :return: priority 字段的原始值；字段缺失时为 None
+    """
+    return _declared_field(declaration, "priority")
 
 
 def declaration_impl(declaration: Any) -> Optional[Any]:
