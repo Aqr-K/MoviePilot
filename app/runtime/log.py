@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import functools
+import inspect
 import logging
 import os
 import queue
@@ -333,7 +334,7 @@ def wrap_for_plugin_instance(func: Callable, plugin_id: str, instance_id: str) -
     :param instance_id: 实例标识
     :return: 包装后的可调用对象
     """
-    if asyncio.iscoroutinefunction(func):
+    if inspect.iscoroutinefunction(func):
         @functools.wraps(func)
         async def _async_wrapped(*args: Any, **kwargs: Any) -> Any:
             with bind_plugin_instance(plugin_id, instance_id):
