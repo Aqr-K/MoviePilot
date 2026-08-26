@@ -296,7 +296,7 @@ function stage_runtime_payload() {
         cp -a "${resource_file}" "${stage_resource_dir}/" || return 1
     done
 
-    python_version="$(python3 -c 'import sys; print(f"cpython-{sys.version_info.major}{sys.version_info.minor}")')" || return 1
+    python_version="$("${VENV_PATH}/bin/python3" -c 'import sys, sysconfig; print(f"cpython-{sys.version_info.major}{sys.version_info.minor}{"t" if sysconfig.get_config_var("Py_GIL_DISABLED") == 1 else ""}")')" || return 1
     arch="$(uname -m)"
     if [ "${arch}" = "aarch64" ]; then
         arch_suffix="aarch64-linux-gnu"

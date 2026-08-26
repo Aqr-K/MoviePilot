@@ -1,6 +1,7 @@
 import os
 import shlex
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -36,7 +37,7 @@ def test_dockerfile_control_bundle_build_checks_fail_closed() -> None:
     assert "COPY pyproject.toml uv.lock ./" in dockerfile
     assert "python3 -m venv --without-pip ${VENV_PATH}" in dockerfile
     assert "UV_PROJECT_ENVIRONMENT=${VENV_PATH} uv sync" in dockerfile
-    for option in ("--locked", "--no-dev", "--no-install-project"):
+    for option in ("--locked", "--no-default-groups", "--group", "--no-install-project"):
         assert option in dockerfile
     assert "uv-pip-compat" not in dockerfile
     assert "requirements.in" not in dockerfile
@@ -915,6 +916,9 @@ def test_failed_dependency_sync_does_not_replace_program_files(tmp_path: Path) -
         encoding="utf-8",
     )
     uv_bin.chmod(0o755)
+    python_bin = tmp_path / "venv" / "bin" / "python3"
+    python_bin.parent.mkdir(parents=True)
+    python_bin.symlink_to(Path(sys.executable))
     live_app = tmp_path / "app"
     live_public = tmp_path / "public"
     (live_app / "app" / "plugins").mkdir(parents=True)
@@ -1394,11 +1398,15 @@ def _run_stage_runtime_payload(tmp_path: Path) -> subprocess.CompletedProcess:
         (stage_app / name).write_text("x\n", encoding="utf-8")
     (tmp_path / "update" / "dist").mkdir(parents=True, exist_ok=True)
     (tmp_path / "update" / "dist" / "index.html").write_text("front", encoding="utf-8")
+    python_bin = tmp_path / "venv" / "bin" / "python3"
+    python_bin.parent.mkdir(parents=True, exist_ok=True)
+    python_bin.symlink_to(Path(sys.executable))
 
     script = textwrap.dedent(
         f"""\
         CONFIG_DIR="$1"
         TMP_PATH="$2"
+        VENV_PATH="$4"
         GITHUB_PROXY= CURL_OPTIONS=
         source {UPDATER!s}
         APP_DIR="$3"
@@ -1418,6 +1426,7 @@ def _run_stage_runtime_payload(tmp_path: Path) -> subprocess.CompletedProcess:
             str(tmp_path / "config"),
             str(tmp_path / "update"),
             str(live_app),
+            str(tmp_path / "venv"),
         ],
         text=True,
         capture_output=True,

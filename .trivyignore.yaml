@@ -1,0 +1,15 @@
+vulnerabilities:
+  - id: GHSA-6v7p-g79w-8964
+    paths:
+      - Python
+    purls:
+      - pkg:pypi/msgpack@1.1.2
+    expired_at: 2026-11-20
+    statement: The finding belongs to the base image's system pip and is not imported by MoviePilot.
+  - id: CVE-2025-47273
+    paths:
+      - Python
+    purls:
+      - pkg:pypi/setuptools@70.3.0
+    expired_at: 2026-11-20
+    statement: The finding belongs to the base image's system pip and is not used for dependency installation.

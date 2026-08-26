@@ -65,3 +65,6 @@ docs/superpowers/
 # 保留本地前端构建产物目录，目录内产物不纳入仓库
 frontend-dist/*
 !frontend-dist/.gitkeep
+
+# setuptools 元数据目录，依赖同步时生成
+*.egg-info/
