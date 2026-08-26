@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7111,
-  "edge_sha256": "2dde3e8981643f315d692850a02d4437793bcd51a9a2d9893a6db63a33666eab",
+  "edge_count": 7109,
+  "edge_sha256": "d5f08244f47c12c7f6e272d97710e8a1297ead2bbacb8238e33899e8902ed840",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -340,8 +340,6 @@
     "app.agent.memory -> app.runtime",
     "app.agent.memory -> app.runtime.config",
     "app.agent.memory -> app.runtime.log",
-    "app.agent.memory -> app.schemas",
-    "app.agent.memory -> app.schemas.agent",
     "app.agent.middleware.activity_log -> app.agent",
     "app.agent.middleware.activity_log -> app.agent.llm",
     "app.agent.middleware.activity_log -> app.agent.llm.helper",
