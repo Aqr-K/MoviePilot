@@ -5,11 +5,30 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from langchain_core.messages import BaseMessage, messages_from_dict, messages_to_dict
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from app.runtime.config import settings
 from app.application.agentdata import get_agent_chat_port
 from app.runtime.log import logger
-from app.schemas.agent import ConversationMemory
+
+
+class ConversationMemory(BaseModel):
+    """对话记忆模型
+
+    消息元素为 langchain 的 ``BaseMessage``，故本模型随 agent 一同位于 agent 域，
+    不放在内核契约层——内核不依赖 langchain。
+    """
+
+    session_id: str = Field(description="会话ID")
+    user_id: Optional[str] = Field(default=None, description="用户ID")
+    messages: List[BaseMessage] = Field(default_factory=list, description="消息列表")
+    updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
+
+    model_config = ConfigDict()
+
+    @field_serializer('updated_at', when_used='json')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat()
 
 
 class MemoryManager:
