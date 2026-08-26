@@ -58,12 +58,40 @@ runtime-free-threaded = ["Brotli==1.2.0", "bcrypt~=5.0.0", "lxml==7.0.0b1",
 
 ### 2.5 反向依赖面
 
+**代码层**（对 `app/agent` / `app/workflow` 包的直接 import）：
+
 | 子系统 | 被反向依赖的文件数 | 具体位置 |
 | --- | --- | --- |
 | `app/agent` | 10 | `startup/agent_initializer.py`、`startup/modules_initializer.py`、`api/endpoints/{agent,openai,llm,history,system,mcp}.py`、`api/service_secrets.py`、`sdk/agent.py` |
 | `app/workflow` | 5 | `startup/{workflow,modules,hostport}_initializer.py`、`scheduler/workflows.py`、`api/endpoints/workflow.py` |
 
-`app/domain`、`app/application`、`app/modules` 对 `app/agent` **零依赖**——它是干净的叶子子系统。
+**数据与服务层**（对 agent/workflow 的模型、oper、服务类的引用）：散落在 `app/agent` 与 `app/workflow` 目录**之外**，共 **20 个文件**，关键位置：
+
+| 位置 | 引用内容 |
+| --- | --- |
+| `app/application/messaging/chat.py` | `AgentChatService`、`AsyncAgentChatRepository`、`AsyncUnitOfWork` |
+| `app/application/workflow_transactional.py` | 直接 `from app.db.oper.workflow import WorkflowOper` |
+| `app/application/agentdata.py` | agent 数据端口 |
+| `app/api/deps.py` | `WorkflowDefinitionCommand`、`WorkflowMutationCommand`、`WorkflowQueryService`、`AgentChatService`、`AgentChatRepository`、`AgentChatUnitOfWork` 的依赖注入 |
+| `app/api/context.py`、`app/api/host_runtime.py` | `AgentChatRuntime` 是宿主运行时组成部分 |
+| `app/scheduler/agent_tasks.py`、`app/scheduler/composition.py` | 调度接线 |
+| `app/schemas/exports.py`、`app/runtime/compat/manifest.py` | 导出与兼容登记 |
+
+**agent/workflow 的「执行引擎」在自己的包里，但「数据 + 服务 + 依赖注入」长在内核的 application/api 层**，因此它们不是可整包摘走的叶子子系统；外挂必须连同这一层一起搬，否则会出现「服务在内核、实现在插件」的割裂，`WorkflowOper` 那类直连会直接断。
+
+### 2.6 agent / workflow 的持久化
+
+内核主库有 4 张属 agent/workflow 的表：`AgentChat`、`AgentTask`、`AgentTaskRun`（`app/db/models/agent*.py`）、`Workflow`（`app/db/models/workflow.py`），配套 3 个 oper（`app/db/oper/{agentchat,agenttask,workflow}.py`）。
+
+这 4 张表在 `database/versions/` 有 **7 个迁移文件**，最早可追到 `2_1_2` 与 `2_1_8`——自 v2 时代就存在，存量用户库里有真实数据（聊天记录、工作流定义、任务运行历史）。
+
+业务上这些表只被 agent/workflow 自己消费，语义上应随之外挂；工程上的前置条件见 §6.4。
+
+### 2.7 已具备的惰性加载骨架
+
+`tests/test_agent_api_lazy_imports.py` 是既有契约测试，锁定「完整路由与 OpenAPI 注册不得物化 Agent、工具或模型运行时」，配合 `AI_AGENT_ENABLE` 开关；`tests/test_agent_lazy_runtime_boundary.py` 用子进程探针检查 `sys.modules` 保持冷态。
+
+**宿主侧「能力不在也能起」的骨架已经存在**，§6.2 的改造是在它之上收口，不是从零建。这是个好消息，降低了 P5 难度。
 
 ## 3. 范围裁决
 
@@ -187,7 +215,11 @@ class DiscordModulePlugin(_PluginBase):
 
 ### 6.1 必须先解的硬结
 
-`app/schemas/agent.py:6` 的 `from langchain_core.messages import BaseMessage` 是 langchain 类型泄漏进 schemas 层的唯一一处。schemas 属内核契约层，不能依赖将被移出的包。需先定义自有消息类型并切断该 import，否则 agent 无法外挂。
+`app/schemas/agent.py:6` 的 `from langchain_core.messages import BaseMessage` 是 langchain 类型泄漏进 schemas 层的唯一一处。schemas 属内核契约层，不能依赖将被移出的包。
+
+**已解（原型阶段落地）**。解法不是在内核定义自有消息类型再做转换，而是把泄漏源整体移出：`BaseMessage` 的唯一用处是 `ConversationMemory.messages` 字段，而 `ConversationMemory` 的唯一使用者是 `app/agent/memory/` 的记忆管理器——它本就是 agent 专属模型，不该待在内核契约层。因此该模型连同其 langchain 依赖一并迁入 `app/agent/memory/`，内核 schemas 零损失，也不需要类型转换层。`app/schemas/exports.py` 由 `scripts/schema/exports.py --write` 重新生成，不手工编辑。
+
+配套新增 `tests/test_v3lite_kernel_dependencies.py`，把「内核层不得 import 外挂第三方包」固化为护栏：`EXTERNALIZED_DISTRIBUTIONS` 列出随 agent 与冷门模块移出的 25 个第三方顶层包，`GUARDED_ROOTS` 列出已解耦、即刻受约束的内核目录（当前为 `schemas`），`PENDING_ROOTS` 记录尚未解耦目录及其清偿方向。后续每完成一个目录的解耦，就把它从后者移入前者——**不要放宽判定**。
 
 ### 6.2 宿主侧改造
 
@@ -201,6 +233,25 @@ class DiscordModulePlugin(_PluginBase):
 ### 6.3 交付形态
 
 agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内部 `tools/` 占 19,177 行，是其最大构成，但工具与 agent 内核耦合紧密，不在本设计里进一步拆分。
+
+### 6.4 持久化外挂的两个前置条件
+
+**前置一：插件自管理数据库框架在 `v3-pure` 上不存在。**
+
+这套东西（`DbManager` 容器、`build_plugin_base()`、`_PluginBase.provides_models()` 钩子、PG per-schema 路由、Alembic 迁移骨架、ORM Mixin）是在**旧的 `v3-python` 分支**上做的。官方 v3 重新分层导致 fork 重新变基时，它随结构性重构一起作废了。已核实：`app/db/manager.py`、`app/db/plugin.py` 均不存在，`provides_models` 全仓零命中。当前分支上插件的持久化仍只有共享 KV 表 `PluginData`。
+
+重建有完整的踩坑记录可复用（会话隔离导致静默丢数据、`reset_plugin` 路径 teardown 从不执行导致库泄漏、多 MetaData 静默漏建表、`merge` vs `add` 的脱管对象语义等），但这是一笔独立的、不小的前置工程，不是既有资产。且它对**所有**插件都有价值，不只 agent/workflow，因此更适合单独立项而非挂在 v3-lite 下面。
+
+**前置二：顺序是反的。** 必须先把 application/api 层的 agent/workflow 服务与依赖注入移走，表才能跟着走；不能先移表。正确依赖链：
+
+```
+重建插件自管理 DB 框架（v3-python 成果，需重做）
+  └─> 移 application/api 层的 agent/workflow 服务与依赖注入
+        └─> 移 4 张表 + 3 个 oper
+              └─> 存量数据搬迁 / 旧表兼容
+```
+
+存量数据处理二选一：一次性搬迁到插件库，或保留读旧表的兼容路径。此前设计完全未覆盖这一项。
 
 ## 7. Python 3.14 / 3.14t 双版本
 
@@ -247,24 +298,28 @@ agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内�
 | 测试基线 | 外挂后大量既有测试引用被移出的模块 | 测试同步迁移，内核测试不得 import 外挂模块 |
 | `_validate_manifest_inventory` | 该校验对清单完整性有要求，模块移出后需相应调整 | 改造时同步处理，不留静默跳过 |
 | 已知脆弱测试 | `tests/test_cache_system.py` 注册全局 `torrent_analysis_port` 不复原，`test_torrent_filter.py` 靠字母序侥幸通过 | 属既有缺口，本设计不修，但批量改动可能触发，需预期 |
+| agent/workflow 数据层耦合 | 原判断为叶子子系统，实为服务层长在 application/api，P5 工作量被低估 | 范围扩大到服务层与依赖注入一并迁移 |
+| 插件自管理 DB 缺失 | v3-python 的框架在 v3-pure 上不存在，持久化外挂无地基 | 单独立项重建，不阻塞其余阶段 |
 
 ## 11. 实施顺序
 
 各阶段独立可验证，每阶段结束测试须全绿。
 
 1. **P0 — Python 3.14 升级**：`requires-python` 提版、双 dependency-group、CI 双变体、测试基线恢复。不含任何外挂改造。
-2. **P1 — schemas 解耦**：切断 `app/schemas/agent.py` 对 `langchain_core` 的依赖，定义自有消息类型。
+2. **P1 — schemas 解耦**（**已完成**）：`ConversationMemory` 连同其 langchain 依赖迁入 `app/agent/memory/`，内核 schemas 不再依赖 `langchain_core`；新增内核第三方依赖护栏 `tests/test_v3lite_kernel_dependencies.py`。详见 §6.1。
 3. **P2 — 声明字段补齐**：`ModuleDeclaration` 增加 `priority`；验证 `activation` 语义确由服务实例配置存在性覆盖。
 4. **P3 — 样板插件**：`discord` 外挂全流程走通（外壳、打包、市场索引、安装、启用、渠道能力注册、卸载）。
 5. **P4 — 批量外挂 modules**：其余 27 个模块按样板套用；静态表让出 8 项；枚举与归一路径处理。
-6. **P5 — agent / workflow 外挂**：14 个宿主侧文件条件化；两个插件交付。
-7. **P6 — 升级路径**：首启扫描与自动补装。
-8. **P7 — 运行时优化**：修随机壁纸自旋；复测内存与 CPU。
+6. **P5 — agent / workflow 外挂**：范围扩大为宿主侧 14 个文件条件化 **加上** application/api 层的 agent/workflow 服务与依赖注入迁移（§2.5「数据与服务层」清单）；两个插件交付。
+7. **P6 — 持久化外挂**：4 张表 + 3 个 oper（§2.6）随 agent/workflow 移出内核。前置为「插件自管理 DB 框架」重建（§6.4），该前置在 `v3-pure` 上尚不存在，本阶段在前置就绪前不具备开工条件，单列跟踪、不占用 P5 工期。
+8. **P7 — 升级路径**：首启扫描与自动补装。
+9. **P8 — 运行时优化**：修随机壁纸自旋；复测内存与 CPU。
 
 ## 12. 待确认清单
 
-评审时需要明确表态的三项：
+评审时需要明确表态的四项：
 
 1. §4.2 的字段缺口补法（`ModuleDeclaration.priority` + `activation` 不新增字段）。
 2. §9 的升级路径（首启自动补装）。
 3. §7.3 的 3.14t 是否接受繁简转换降级。
+4. 持久化外挂（4 张表 + 插件自管理 DB 重建，见 §2.6、§6.4）是纳入 v3-lite 范围，还是单独立项。
