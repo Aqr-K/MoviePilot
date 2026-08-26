@@ -2,7 +2,7 @@
 
 - 日期：2026-08-26
 - 基线：`refactor/v3-pure` @ `f31300f64`
-- 状态：P1、P2 已完成；P3 样板验证（`discord`）已完成，核心假设验证为**部分成立**（缺口清单见 §4.5）；其余章节待评审
+- 状态：P0、P1、P2 已完成；P3 样板验证（`discord`）已完成，核心假设验证为**部分成立**（缺口清单见 §4.5）；其余章节待评审
 
 ## 1. 目标
 
@@ -36,7 +36,7 @@
 
 ### 2.3 上游 v3 的 Python 现状
 
-- `requires-python = ">=3.14"`（本 fork 当前为 `>=3.12`）。
+- `requires-python = ">=3.14"`（本 fork 原为 `>=3.12`，已于 P0 对齐，见 §7.4）。
 - `.github/workflows/build-v3.yml` 与 `beta.yml` 已有完整的 free-threaded 双镜像流水线（amd64 + arm64，构建参数 `MOVIEPILOT_PYTHON_VARIANT=free-threaded`）。
 - 依赖按 ABI 分成两组：
 
@@ -324,9 +324,38 @@ agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内�
 
 3.14t 的约束是 C 扩展必须有 free-threaded wheel。减负后本体依赖收窄约 300 MB，其中 `numpy`、`botocore` 等重型 C 扩展/大包全部移出内核，free-threaded 兼容面自然改善。**外挂插件是否支持 3.14t 由插件自身声明**，内核不为插件的 ABI 兼容性兜底。
 
-### 7.3 已知取舍
+### 7.3 已知取舍：3.14t 的中文能力降级比上游更重
 
-上游在 free-threaded 组里放弃了 `zhconv-rs`。本设计选择保留中文 NLP 栈（见 3.3），因此 3.14t 变体在 `zhconv-rs` 上会遇到同样问题。评审时需决定：3.14t 变体是否接受与上游相同的繁简转换降级。
+上游在 free-threaded 组里放弃了 `zhconv-rs`（无 free-threaded wheel）。本 fork 还多一个上游没有的 `jieba-next`——经 PyPI 核实，它是 Rust 扩展、wheel 为版本特定 ABI（`cp39`–`cp314`），**所有已发布版本均无 `cp314t` wheel**。按 `zhconv-rs` 的同一处理范式，它只进 `runtime-standard`。
+
+结果：**3.14t 变体同时缺中文分词与繁简转换**，而上游只缺后者。这两项都在 `app/foundation` 与 `app/domain/meta` 的识别路径上，降级会直接影响中文识别质量。
+
+评审需决定：3.14t 变体是否接受这个比上游更重的降级；若不接受，可选方向是为这两个包寻找纯 Python 替代、或在 free-threaded 变体下改走降级路径而非缺失。
+
+### 7.4 升级实测结果
+
+P0 已完成（提交 `413aa09d1`、`c77a6bd39`、`11ddedab8`），实测数据：
+
+| 检验项 | 结果 |
+| --- | --- |
+| `app/` 与 `tests/` 语法编译（3.14.7） | 零错误 |
+| 依赖解析 `--python 3.14` / `3.14t` | 各 208 包，均成功 |
+| 实际安装（`runtime-standard` 组） | 成功，含 Rust/C 扩展 |
+| 全量测试 @ 3.14.7 | 8484 passed / 4 skipped / 1 failed |
+| 新增回归 | 无 |
+
+唯一失败为既有项 `test_official_plugin_baseline_records_external_source`（fixture `schema_version` 为 2、测试期望 3），与本次升级无关。
+
+**语言层面零不兼容**——3.12→3.14 的风险不在代码而在依赖矩阵，这印证了把 P0 单列、不与外挂改造叠加的判断。仅一处需修：`asyncio.iscoroutinefunction` 在 3.14 弃用、3.16 移除，已改用 `inspect.iscoroutinefunction`。
+
+### 7.5 未经验证的部分
+
+以下事项受限于环境（无 docker、无法跑 trivy），只做了静态核对，**未实际验证**：
+
+- `python:3.14.7-slim-trixie` 基础镜像是否可解析（照抄上游，未拉取）。
+- `PYTHON_THREAD_INHERIT_CONTEXT=0` 的运行时效果（该环境变量本身经既有测试确认为真实意图）。
+- **`.trivyignore.yaml` 未采用上游的 8 条 rclone/Go stdlib 忽略项**：它们绑定精确 purl 版本 `pkg:golang/stdlib@v1.26.5`，对应上游固定摘要镜像 `rclone/rclone:1.75.0@sha256:...`；本 fork 仍以 `curl install.sh` 浮动安装 rclone，照抄会得到永不生效的条目并制造已豁免的错觉。**CI 首次跑 trivy 很可能因此失败**，需以实际扫描结果重新生成，或把 Dockerfile 也改为固定摘要镜像。
+- 上游 Dockerfile 的 `verify_venv_*` 阶段未移植：它们 `COPY` 的 `app/doctor/dependencies.py` 在本 fork 不存在，照抄会让所有镜像构建立即失败。
 
 ## 8. 运行时优化
 
@@ -367,7 +396,7 @@ agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内�
 
 各阶段独立可验证，每阶段结束测试须全绿。
 
-1. **P0 — Python 3.14 升级**：`requires-python` 提版、双 dependency-group、CI 双变体、测试基线恢复。不含任何外挂改造。
+1. **P0 — Python 3.14 升级**（**已完成**）：`requires-python` 提至 `>=3.14`、ABI 双 dependency-group、Docker 与 CI 双变体、8484 测试通过且无新增回归。实测与未验证项见 §7.4、§7.5。
 2. **P1 — schemas 解耦**（**已完成**）：`ConversationMemory` 连同其 langchain 依赖迁入 `app/agent/memory/`，内核 schemas 不再依赖 `langchain_core`；新增内核第三方依赖护栏 `tests/test_v3lite_kernel_dependencies.py`。详见 §6.1。
 3. **P2 — 声明字段补齐**（**已完成**）：`ModuleDeclaration` 增加 `priority` 字段（提交 `627720379`），声明层与投影层完整携带该值；`activation` 语义是否确由服务实例配置存在性覆盖，已在 P3 样板阶段验证为部分成立（见 §4.2、§4.5 G2）。
 4. **P3 — 样板插件**（**可行性验证已完成，见 §4.5**）：前置条件是先解决 G1（跨源排序仲裁）——插件源目前无条件优先于宿主源，任何模块外挂都会在单播场景下改变分发结果，这条必须先于任何模块的外挂改造完成，不能留到批量阶段才补。
@@ -389,6 +418,6 @@ agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内�
 
 1. §4.2 / §4.5 的 `activation` 判断——已验证、部分证伪：实例生死等价，方法表闸门不等价（G2）。需评审表态的是 G2 的绕法是否接受：插件启用即挂方法表、各方法内部按配置为空提前返回的语义放宽方案（代价是多一次空转调用）。`priority` 字段已落地，不在本清单内。
 2. §9 的升级路径（首启自动补装）。
-3. §7.3 的 3.14t 是否接受繁简转换降级。
+3. §7.3 的 3.14t 中文能力降级是否接受——本 fork 因多一个 `jieba-next`，free-threaded 变体会同时缺分词与繁简转换，比上游更重。
 4. 持久化外挂（4 张表 + 插件自管理 DB 重建，见 §2.6、§6.4）是纳入 v3-lite 范围，还是单独立项。
 5. 插件模块的排序机制与跨源仲裁规则如何设计（让插件源也按 priority 排序、统一两源到同一排序体系、还是保持插件优先并接受行为变化，见 §4.4、§4.5 G1）。P3 样板阶段已实测证实该问题真实存在且属阻塞性，须在 P4 批量外挂前定案（见 §11）。
