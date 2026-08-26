@@ -46,7 +46,7 @@ dependencies = [
     "langgraph~=1.2.11",
     "langgraph-checkpoint~=4.2.0",
     "lark-oapi~=1.6.8",
-    "moviepilot-rust~=0.2.8",
+    "moviepilot-rust~=0.3.2",
     "mutagen~=1.47.0",
     "openai~=2.41.1",
     "oss2~=2.19.1",
@@ -113,7 +113,6 @@ dev = [
 runtime-standard = [
     "Brotli==1.2.0",
     "bcrypt~=4.3.0",
-    "jieba-next~=1.0.0rc1",
     "lxml~=6.1.2",
     "psycopg2-binary~=2.9.12",
     "zhconv-rs~=0.4.1",
@@ -149,6 +148,9 @@ required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
+
+[tool.uv.extra-build-variables]
+orjson = { ORJSON_BUILD_FREETHREADED = "1" }
 
 [tool.uv.sources]
 brotli = { url = "https://github.com/google/brotli/archive/51be27dbd9782f9fe27bc6e06cee6ff18311702d.tar.gz", group = "runtime-free-threaded" }

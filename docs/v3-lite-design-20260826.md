@@ -47,7 +47,9 @@ runtime-free-threaded = ["Brotli==1.2.0", "bcrypt~=5.0.0", "lxml==7.0.0b1",
                          "psycopg[c]==3.3.4"]
 ```
 
-注意 `zhconv-rs` 在 free-threaded 组里被整个去掉——上游的 3.14t 镜像是**缺繁简转换**的。
+`zhconv-rs` 在 free-threaded 组里被整个去掉，但这**不代表上游的 3.14t 缺繁简转换**——上游在 `app/foundation/text.py` 里按运行时分流：free-threaded 下改用 `moviepilot_rust.zhconv_fast`，标准运行时才用 `zhconv-rs`。同理，上游没有 `jieba-next` 依赖，分词一律走 `moviepilot_rust.jieba_cut`。
+
+**依赖分组本身推不出运行行为，必须看调用点。**本 fork 已按同一形态对齐，见 §7.3。
 
 ### 2.4 已具备的架构支点
 
@@ -121,7 +123,7 @@ runtime-free-threaded = ["Brotli==1.2.0", "bcrypt~=5.0.0", "lxml==7.0.0b1",
 
 以下两项经评估后**留在内核**，本设计不碰：
 
-- **中文识别 NLP 栈**（`jieba` 38 MB + `Pinyin2Hanzi` 36 MB + `cn2an` + `zhconv`）：长在 `app/foundation` 与 `app/domain/meta` 里，属核心识别能力，不是「没人用的功能」。
+- **中文识别 NLP 栈**（`Pinyin2Hanzi` 36 MB + `cn2an` + `zhconv-rs`）：长在 `app/foundation` 与 `app/domain/meta` 里，属核心识别能力，不是「没人用的功能」。其中分词已收敛到 `moviepilot-rust` 原生入口、`jieba-next` 依赖随之移除（见 §7.3），故本项体积较 §3.4 统计时已有缩减。
 - **站点抓取浏览器栈**（`cloakbrowser` → 传递依赖 `playwright` 132 MB）：虽然 `app/` 下仅 `app/adapters/network` 一处引用，但属反爬基础能力。
 
 ### 3.4 体积收益
@@ -324,13 +326,18 @@ agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内�
 
 3.14t 的约束是 C 扩展必须有 free-threaded wheel。减负后本体依赖收窄约 300 MB，其中 `numpy`、`botocore` 等重型 C 扩展/大包全部移出内核，free-threaded 兼容面自然改善。**外挂插件是否支持 3.14t 由插件自身声明**，内核不为插件的 ABI 兼容性兜底。
 
-### 7.3 已知取舍：3.14t 的中文能力降级比上游更重
+### 7.3 中文能力：已对齐上游，3.14t 无降级
 
-上游在 free-threaded 组里放弃了 `zhconv-rs`（无 free-threaded wheel）。本 fork 还多一个上游没有的 `jieba-next`——经 PyPI 核实，它是 Rust 扩展、wheel 为版本特定 ABI（`cp39`–`cp314`），**所有已发布版本均无 `cp314t` wheel**。按 `zhconv-rs` 的同一处理范式，它只进 `runtime-standard`。
+`zhconv-rs` 与 `jieba-next` 都没有 `cp314t` wheel。若直接沿用旧实现，3.14t 变体会同时缺繁简转换与中文分词。
 
-结果：**3.14t 变体同时缺中文分词与繁简转换**，而上游只缺后者。这两项都在 `app/foundation` 与 `app/domain/meta` 的识别路径上，降级会直接影响中文识别质量。
+解法照搬上游：**把两项能力都收敛到 `moviepilot-rust` 的原生入口**（`moviepilot-rust` 由 `~=0.2.8` 升至 `~=0.3.2`，与上游一致）。
 
-评审需决定：3.14t 变体是否接受这个比上游更重的降级；若不接受，可选方向是为这两个包寻找纯 Python 替代、或在 free-threaded 变体下改走降级路径而非缺失。
+- **分词**：`cut()` 一律走 `moviepilot_rust.jieba_cut`，两种运行时同一实现，`jieba-next` 依赖随之移除。
+- **繁简转换**：`convert()` 在导入期按 `is_free_threaded_runtime()` 绑定实现——free-threaded 下取 `moviepilot_rust.zhconv_fast`，标准运行时取 `zhconv_rs.zhconv`。
+
+该包的 wheel 分发正好支撑这一形态：标准 wheel（`cp314-abi3`）只带 `jieba_cut`（标准运行时的繁简转换交给 `zhconv-rs`），free-threaded wheel（`cp314-cp314t`）则 `jieba_cut` 与 `zhconv_fast` 俱全。
+
+**两种运行时实测结果一致**（见 §7.4），3.14t **不再有中文能力降级**，且本 fork 的 `runtime-standard` 组现已与上游逐字一致。
 
 ### 7.4 升级实测结果
 
@@ -341,6 +348,7 @@ P0 已完成（提交 `413aa09d1`、`c77a6bd39`、`11ddedab8`），实测数据�
 | `app/` 与 `tests/` 语法编译（3.14.7） | 零错误 |
 | 依赖解析 `--python 3.14` / `3.14t` | 各 208 包，均成功 |
 | 实际安装（`runtime-standard` 组） | 成功，含 Rust/C 扩展 |
+| free-threaded 实测（`sys._is_gil_enabled()` 为假） | `cut('这是一个测试标题', HMM=False)` → `['这','是','一个','测试','标题']`；`convert('繁體','zh-cn')` → `繁体`；与标准运行时逐字节一致 |
 | 全量测试 @ 3.14.7 | 8484 passed / 4 skipped / 1 failed |
 | 新增回归 | 无 |
 
@@ -418,6 +426,6 @@ P0 已完成（提交 `413aa09d1`、`c77a6bd39`、`11ddedab8`），实测数据�
 
 1. §4.2 / §4.5 的 `activation` 判断——已验证、部分证伪：实例生死等价，方法表闸门不等价（G2）。需评审表态的是 G2 的绕法是否接受：插件启用即挂方法表、各方法内部按配置为空提前返回的语义放宽方案（代价是多一次空转调用）。`priority` 字段已落地，不在本清单内。
 2. §9 的升级路径（首启自动补装）。
-3. §7.3 的 3.14t 中文能力降级是否接受——本 fork 因多一个 `jieba-next`，free-threaded 变体会同时缺分词与繁简转换，比上游更重。
+3. ~~3.14t 的中文能力降级~~——已解决：分词与繁简转换收敛到 `moviepilot-rust` 原生入口，两种运行时实测一致，无需表态（见 §7.3）。
 4. 持久化外挂（4 张表 + 插件自管理 DB 重建，见 §2.6、§6.4）是纳入 v3-lite 范围，还是单独立项。
 5. 插件模块的排序机制与跨源仲裁规则如何设计（让插件源也按 priority 排序、统一两源到同一排序体系、还是保持插件优先并接受行为变化，见 §4.4、§4.5 G1）。P3 样板阶段已实测证实该问题真实存在且属阻塞性，须在 P4 批量外挂前定案（见 §11）。

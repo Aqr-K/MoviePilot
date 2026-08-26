@@ -82,8 +82,8 @@
       "app.workflow.actions -> app.db.oper.systemconfig"
     ]
   },
-  "edge_count": 7109,
-  "edge_sha256": "d5f08244f47c12c7f6e272d97710e8a1297ead2bbacb8238e33899e8902ed840",
+  "edge_count": 7111,
+  "edge_sha256": "f21f70421bd0c6c904da6d712db6848761c2287819f9523255f3d9c7968fa444",
   "edges": [
     "app -> app.runtime",
     "app -> app.runtime.compat",
@@ -4133,6 +4133,8 @@
     "app.factory -> app.schemas.response",
     "app.factory -> app.startup",
     "app.factory -> app.startup.lifecycle",
+    "app.foundation.text -> app.foundation",
+    "app.foundation.text -> app.foundation.environment",
     "app.main -> app.adapters",
     "app.main -> app.adapters.system",
     "app.main -> app.adapters.system.host",
