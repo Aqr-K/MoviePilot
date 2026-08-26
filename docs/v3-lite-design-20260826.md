@@ -154,8 +154,8 @@ runtime-free-threaded = ["Brotli==1.2.0", "bcrypt~=5.0.0", "lxml==7.0.0b1",
 | `multi_instance` | `ServiceInstanceDeclaration.multi_instance` |
 | 渠道能力 | `provides_channel_capabilities` |
 | `depends_on` | 插件自身的依赖声明 |
-| `priority` | **缺口，见 4.2** |
-| `activation.policy` / `activation.selector` | **缺口，见 4.2** |
+| `priority` | `ModuleDeclaration.priority`（字段已补；宿主侧排序机制未定，见 4.4） |
+| `activation.policy` / `activation.selector` | 假设由服务实例配置存在性覆盖（**待验证**，见 4.2） |
 
 一个内建模块 ≈ `ModuleDeclaration`（方法表）+ `ServiceInstanceDeclaration`（可配置类型）的组合。两族的职责分工在 `ModuleDeclaration` 的文档里已经写明——「本声明只描述方法表，按用户配置扇出多个具名服务实例是另一回事」——正好对应模块的两个面。
 
@@ -165,17 +165,19 @@ runtime-free-threaded = ["Brotli==1.2.0", "bcrypt~=5.0.0", "lxml==7.0.0b1",
 
 ### 4.2 两处字段缺口的补法
 
-> 以下为待确认假设，评审时需明确认可或改写。
+**`priority`（分发顺序）**：`ModuleDeclaration` 已增加 `priority: int` 字段（提交 `627720379`），配套读取器 `declaration_module_priority()` 与注册期类型校验已就绪，声明层与投影层完整携带该值——字段本身已经落地，不再是待确认项。
 
-**`priority`（分发顺序）**：给 `ModuleDeclaration` 增加 `priority: int` 字段。这是「用什么提供」之外的分发元数据，落在方法表声明上语义正确——同一方法名有多个提供者时，宿主按 priority 排序。
+但**宿主侧尚无消费方**：`PluginProviderSource._providers()` 遍历 `catalog.get_plugin_modules()`——由所有声明扁平化而成的 `{方法名: 可调用对象}` 字典，只按注册顺序遍历，从不读取 priority 值。也就是说，字段目前只保证语义在声明与投影层不丢失，真正待做的是**插件模块的排序机制设计**：谁读这个字段、在哪一层用它排序、如何与内建侧已有的排序方式协调。这块工作比字段本身更重，详见 §4.4。
 
-**`activation.policy` / `activation.selector`**：不新增字段。理由：
+**`activation.policy` / `activation.selector`**：不新增字段，但这是**尚待验证的假设**，不是已定结论：
 
 - `policy = "when_configured"` 的语义由 `provides_service_instances` 的**配置存在性**天然表达——用户没配就没有实例，效果等同。
 - `activation.selector` 指向的 `system_config_item`（如 `Notifications` 里 `type == "discord"` 且 `enabled` 为真）本就是服务实例配置列表的一条记录，宿主已按这条记录构造实例。
 - 插件自身的启用/停用开关覆盖 `policy` 的其余取值。
 
-因此两个缺口实际只需新增**一个**字段。
+以上等价关系目前只是推论，尚未经代码验证，正由 P3 样板阶段（`discord`）实测确认 `activation.selector` 与「配置存在性」是否真的等价，见 §11。
+
+综合两项：字段层面的缺口已经补齐（`priority` 落地、`activation` 判断降级为待验证假设），但**机制层面的缺口——插件模块的排序与跨源仲裁——尚未解决**，且比字段缺口更重要：字段只负责携带数据，机制才决定分发结果。详见 §4.4。
 
 ### 4.3 插件外壳形态
 
@@ -196,6 +198,16 @@ class DiscordModulePlugin(_PluginBase):
 ```
 
 模块业务代码本身（`app/modules/discord/discord.py` 等）迁入插件包后基本不动，新增的是插件外壳与打包元数据。
+
+### 4.4 外挂对分发顺序的影响
+
+两个 provider 源的排序规则不同：宿主侧 `HostModuleExtension.priority` 读 `instance.get_priority()`，`ModuleManager._build_capability_index` 与 `HostModuleProviderSource.notify_providers` 均按其升序排序，priority 在这一侧真正被消费；插件侧 `PluginProviderSource._providers()` 遍历 `catalog.get_plugin_modules()`（声明扁平化后的 `{方法名: 可调用对象}` 字典），只按注册顺序遍历，不读取 priority。
+
+跨源顺序还是硬编码的：`app/runtime/extensions/projection/dispatcher.py:92-93` 中 `PluginProviderSource` 永远排在 `HostModuleProviderSource` 之前，与任何 priority 值无关。
+
+后果是模块外挂后从「priority 升序」整体跨到「注册顺序 + 插件源整体优先」这套完全不同的排序体系：按 §3.2 的裁决，28 个外挂模块会永远优先于仍留在内核的 19 个模块被调用，而外挂之前这 47 个模块本是按同一套 priority 统一排序的。`tests/test_plugin_provided_modules.py::test_plugin_priority_does_not_yet_govern_dispatch_order` 已用真实分发运行固化此事实：后注册、priority 数值更优（更小）的插件，在 `unicast()` 中仍输给先注册、priority 更差的插件。
+
+在单播（只取一个结果）类分发下，这会直接改变现有行为，是 v3-lite 尚未解决的问题。处置方向——插件源改按 priority 排序、统一两源到同一排序体系、还是保持插件优先并接受行为变化——需在样板阶段确定。
 
 ## 5. 渠道能力双轨的处理
 
@@ -294,6 +306,7 @@ agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内�
 | --- | --- | --- |
 | Python 3.14 跳版 | 当前测试环境为 3.12，直升 3.14 会同时引入语言与依赖两层变化 | 先单独完成 3.12→3.14 升级并跑通测试基线，再开始外挂改造，不叠加 |
 | 28 个插件外壳的一致性 | 逐个手写易出现形态漂移 | 先做 1 个样板（建议 `discord`，依赖独占、结构简单）定型，再批量套用 |
+| 外挂改变分发顺序 | 模块从宿主源（priority 升序）迁至插件源（注册顺序且整源优先），单播场景行为改变 | 样板阶段实测确认影响范围，排序机制随之设计 |
 | 渠道枚举移除 | 存量配置持有已移除的枚举取值 | 归一路径给可诊断结果；覆盖测试必须包含「配置引用未安装渠道」的用例 |
 | 测试基线 | 外挂后大量既有测试引用被移出的模块 | 测试同步迁移，内核测试不得 import 外挂模块 |
 | `_validate_manifest_inventory` | 该校验对清单完整性有要求，模块移出后需相应调整 | 改造时同步处理，不留静默跳过 |
@@ -307,8 +320,8 @@ agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内�
 
 1. **P0 — Python 3.14 升级**：`requires-python` 提版、双 dependency-group、CI 双变体、测试基线恢复。不含任何外挂改造。
 2. **P1 — schemas 解耦**（**已完成**）：`ConversationMemory` 连同其 langchain 依赖迁入 `app/agent/memory/`，内核 schemas 不再依赖 `langchain_core`；新增内核第三方依赖护栏 `tests/test_v3lite_kernel_dependencies.py`。详见 §6.1。
-3. **P2 — 声明字段补齐**：`ModuleDeclaration` 增加 `priority`；验证 `activation` 语义确由服务实例配置存在性覆盖。
-4. **P3 — 样板插件**：`discord` 外挂全流程走通（外壳、打包、市场索引、安装、启用、渠道能力注册、卸载）。
+3. **P2 — 声明字段补齐**（**已完成**）：`ModuleDeclaration` 增加 `priority` 字段（提交 `627720379`），声明层与投影层完整携带该值；`activation` 语义是否确由服务实例配置存在性覆盖，留待 P3 样板阶段实测验证。
+4. **P3 — 样板插件**：`discord` 外挂全流程走通（外壳、打包、市场索引、安装、启用、渠道能力注册、卸载）；同时验证 `activation.selector` 与配置存在性的等价假设，并设计插件模块的排序机制与跨源仲裁规则（§4.4）。
 5. **P4 — 批量外挂 modules**：其余 27 个模块按样板套用；静态表让出 8 项；枚举与归一路径处理。
 6. **P5 — agent / workflow 外挂**：范围扩大为宿主侧 14 个文件条件化 **加上** application/api 层的 agent/workflow 服务与依赖注入迁移（§2.5「数据与服务层」清单）；两个插件交付。
 7. **P6 — 持久化外挂**：4 张表 + 3 个 oper（§2.6）随 agent/workflow 移出内核。前置为「插件自管理 DB 框架」重建（§6.4），该前置在 `v3-pure` 上尚不存在，本阶段在前置就绪前不具备开工条件，单列跟踪、不占用 P5 工期。
@@ -317,9 +330,10 @@ agent 与 workflow 各作为一个插件交付，而非拆成多个。agent 内�
 
 ## 12. 待确认清单
 
-评审时需要明确表态的四项：
+评审时需要明确表态的五项：
 
-1. §4.2 的字段缺口补法（`ModuleDeclaration.priority` + `activation` 不新增字段）。
+1. §4.2 的 `activation` 判断（不为 `policy` / `selector` 新增字段，改由服务实例配置存在性覆盖）——该假设待 P3 样板阶段实测确认。`priority` 字段已落地，不在本清单内。
 2. §9 的升级路径（首启自动补装）。
 3. §7.3 的 3.14t 是否接受繁简转换降级。
 4. 持久化外挂（4 张表 + 插件自管理 DB 重建，见 §2.6、§6.4）是纳入 v3-lite 范围，还是单独立项。
+5. 插件模块的排序机制与跨源仲裁规则如何设计（让插件源也按 priority 排序、统一两源到同一排序体系、还是保持插件优先并接受行为变化，见 §4.4）。
