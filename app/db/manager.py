@@ -11,6 +11,7 @@ ScopedSession，落在 ``PLUGIN_DATA_PATH/<plugin_id>/<plugin_id>.db``，与核�
 - 注册表按 plugin_id 持有 PluginDatabase 实例（引擎/会话工厂/ScopedSession）。
 - 与核心 app.db 完全解耦：插件表挂在各自的 MetaData 上，互不牵连建表/删表/迁移。
 """
+import threading
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -131,6 +132,9 @@ class DbManager:
 
     def __init__(self):
         self._plugins: Dict[str, PluginDatabase] = {}
+        # 保护 register_plugin 的 check-then-set：get_plugin_db 可能在插件运行期的多个工作
+        # 线程并发首建同一插件容器，无锁会各自 build 一个 bundle、后者覆盖前者并泄漏引擎。
+        self._lock = threading.RLock()
 
     def register_plugin(self, plugin_id: str) -> PluginDatabase:
         """注册（或返回已注册的）插件数据库容器。
@@ -141,11 +145,27 @@ class DbManager:
         existing = self._plugins.get(plugin_id)
         if existing is not None:
             return existing
-        if settings.DB_TYPE == "postgresql":
-            bundle = self._build_postgresql_bundle(plugin_id)
-        else:
-            bundle = self._build_sqlite_bundle(plugin_id)
-        self._plugins[plugin_id] = bundle
+        with self._lock:
+            # 双重检查：等锁期间可能已有另一线程完成注册
+            existing = self._plugins.get(plugin_id)
+            if existing is not None:
+                return existing
+            if settings.DB_TYPE == "postgresql":
+                bundle = self._build_postgresql_bundle(plugin_id)
+            else:
+                bundle = self._build_sqlite_bundle(plugin_id)
+            self._plugins[plugin_id] = bundle
+            return bundle
+
+    def attach_metadata(self, plugin_id: str, metadata) -> "PluginDatabase":
+        """注册插件容器并把 plugin_id 绑定到其模型 MetaData，供模型自会话 ORM 自解析会话。
+
+        plugin_id 由框架从插件实例类名自动推导（唯一来源、无手传/误传）；将其打到
+        ``metadata.info['plugin_id']`` 上，模型 ORM 即可经 MetaData 反查本插件容器。
+        """
+        bundle = self.register_plugin(plugin_id)
+        metadata.info["plugin_id"] = plugin_id
+        bundle.metadata = metadata
         return bundle
 
     @staticmethod
@@ -153,7 +173,9 @@ class DbManager:
         """SQLite：每插件独立 .db 文件 + 独立引擎/会话（独占引擎）。"""
         db_path = _plugin_db_path(plugin_id)
         engine = _build_sqlite_engine(db_path)
-        session_factory = sessionmaker(bind=engine)
+        # expire_on_commit=False：commit 后对象属性不失效，使模型自会话 ORM 的 create() 能在
+        # 会话清理后仍返回带自增主键的对象、list()/get() 返回的对象属性可读（无隐式 re-SELECT）
+        session_factory = sessionmaker(bind=engine, expire_on_commit=False)
         return PluginDatabase(
             plugin_id=plugin_id,
             engine=engine,
@@ -172,7 +194,8 @@ class DbManager:
         schema = _plugin_schema(plugin_id)
         # execution_options 返回共享同一连接池的引擎外观，所有 SQL 把默认 schema 路由到插件 schema
         routed_engine = CoreEngine.execution_options(schema_translate_map={None: schema})
-        session_factory = sessionmaker(bind=routed_engine)
+        # expire_on_commit=False：理由同 SQLite，保证模型自会话 ORM 在会话清理后属性仍可读
+        session_factory = sessionmaker(bind=routed_engine, expire_on_commit=False)
         return PluginDatabase(
             plugin_id=plugin_id,
             engine=routed_engine,
@@ -207,6 +230,13 @@ class DbManager:
         bundle = self._plugins.pop(plugin_id, None)
         if bundle is None:
             return
+        # 清除模型 MetaData 上的 plugin_id 锚点：删库后再调用模型 ORM 应命中「未就绪」清晰报错，
+        # 而非经懒注册静默重建一个空容器/空库（破坏「删除数据」语义）。
+        if bundle.metadata is not None:
+            try:
+                bundle.metadata.info.pop("plugin_id", None)
+            except Exception:  # noqa: BLE001 - info 清理失败不应阻断删库
+                pass
         if bundle.schema:
             # PostgreSQL：DROP SCHEMA CASCADE（不删文件、不释放共享核心连接池）
             try:

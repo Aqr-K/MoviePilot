@@ -33,7 +33,7 @@ def test_plugin_owns_isolated_table_for_read_write():
     from app.db.manager import db_manager
     from app.db.plugin import build_plugin_base
 
-    PluginBase = build_plugin_base("note_plugin")
+    PluginBase = build_plugin_base()
 
     class Note(PluginBase):
         __tablename__ = "note"
@@ -41,7 +41,8 @@ def test_plugin_owns_isolated_table_for_read_write():
         text: Mapped[str] = mapped_column(String)
 
     try:
-        # 在插件独立库建表
+        # 注册容器 + 绑定 plugin_id 到 MetaData（无参 build_plugin_base 不再代建容器），再建表
+        db_manager.attach_metadata("note_plugin", Note.metadata)
         db_manager.create_tables("note_plugin")
         bundle = db_manager.get("note_plugin")
 
@@ -70,13 +71,14 @@ def test_drop_plugin_removes_db_file_and_unregisters():
     from app.db.manager import db_manager
     from app.db.plugin import build_plugin_base
 
-    PluginBase = build_plugin_base("temp_plugin")
+    PluginBase = build_plugin_base()
 
     class Item(PluginBase):
         __tablename__ = "item"
         id: Mapped[int] = mapped_column(primary_key=True)
         name: Mapped[str] = mapped_column(String)
 
+    db_manager.attach_metadata("temp_plugin", Item.metadata)
     db_manager.create_tables("temp_plugin")
     bundle = db_manager.get("temp_plugin")
     db_path = bundle.db_path
@@ -107,7 +109,7 @@ def test_setup_and_teardown_plugin_database_via_models_hook():
         teardown_plugin_database,
     )
 
-    PluginBase = build_plugin_base("HookPlugin")
+    PluginBase = build_plugin_base()
 
     class Record(PluginBase):
         __tablename__ = "record"
@@ -115,7 +117,7 @@ def test_setup_and_teardown_plugin_database_via_models_hook():
         val: Mapped[str] = mapped_column(String)
 
     class HookPlugin:
-        # 类名须与 build_plugin_base 的 id 一致（框架按 __class__.__name__ 取 plugin_id）
+        # 框架按 __class__.__name__ 自动取 plugin_id（无需手传），故类名即 plugin_id
         def provides_models(self):
             return [Record]
 
@@ -282,13 +284,14 @@ def test_dispose_keeps_data_file_drop_removes_it():
     from app.db.manager import db_manager
     from app.db.plugin import build_plugin_base
 
-    PluginBase = build_plugin_base("keep_plugin")
+    PluginBase = build_plugin_base()
 
     class Row(PluginBase):
         __tablename__ = "row"
         id: Mapped[int] = mapped_column(primary_key=True)
         v: Mapped[str] = mapped_column(String)
 
+    db_manager.attach_metadata("keep_plugin", Row.metadata)
     db_manager.create_tables("keep_plugin")
     bundle = db_manager.get("keep_plugin")
     db_path = bundle.db_path
@@ -329,7 +332,7 @@ def test_setup_plugin_database_uses_migrations_when_location_declared():
     )
     from app.db.plugin_migration import write_plugin_alembic_env
 
-    PluginBase = build_plugin_base("MigHookPlugin")
+    PluginBase = build_plugin_base()
 
     class Thing(PluginBase):
         __tablename__ = "thing"
@@ -368,3 +371,69 @@ def test_setup_plugin_database_uses_migrations_when_location_declared():
     finally:
         teardown_plugin_database("MigHookPlugin")
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_plugin_model_self_session_orm():
+    """模型自会话 ORM：create/get/list/update/delete 绑定本插件独立库，自动取会话/提交/清理。
+
+    验证「无需手传 id、无需手搓 session」的接口：plugin_id 由 setup 从插件实例类名自动判断并
+    绑定到模型 MetaData，模型 ORM 据此自解析会话。update 用 merge（脱管对象按主键 UPDATE）。
+    """
+    from sqlalchemy import String
+
+    from sqlalchemy.orm import Mapped, mapped_column
+
+    from app.db.manager import db_manager
+    from app.db.plugin import (
+        build_plugin_base,
+        setup_plugin_database,
+        teardown_plugin_database,
+    )
+
+    PluginBase = build_plugin_base()
+
+    class OrmModel(PluginBase):
+        __tablename__ = "orm_item"
+        id: Mapped[int] = mapped_column(primary_key=True)
+        name: Mapped[str] = mapped_column(String)
+
+    class OrmPlugin:
+        # 类名即 plugin_id（框架自动判断，无手传）
+        def provides_models(self):
+            return [OrmModel]
+
+    try:
+        setup_plugin_database(OrmPlugin())   # 建表 + 把 plugin_id 绑定到 MetaData
+
+        # create：返回带自增主键的对象（expire_on_commit=False，主键直接可读）
+        obj = OrmModel(name="a").create()
+        assert isinstance(obj.id, int) and obj.id > 0
+        OrmModel(name="b").create()
+
+        # list / get
+        assert sorted(m.name for m in OrmModel.list()) == ["a", "b"]
+        assert OrmModel.get(obj.id).name == "a"
+
+        # update：脱管对象经 add 按主键 UPDATE（self 本身成持久对象，无 merge 分叉）
+        obj.update({"name": "a2"})
+        assert OrmModel.get(obj.id).name == "a2"
+
+        # get → update（跨会话：上一会话已关闭、对象脱管，再 update 须走 UPDATE 而非 INSERT 冲突）
+        fetched = OrmModel.get(obj.id)
+        fetched.update({"name": "a3"})
+        assert OrmModel.get(obj.id).name == "a3"
+
+        # to_dict
+        d = OrmModel.get(obj.id).to_dict()
+        assert d["name"] == "a3" and "id" in d
+
+        # delete
+        OrmModel.delete(obj.id)
+        assert OrmModel.get(obj.id) is None
+        assert [m.name for m in OrmModel.list()] == ["b"]
+
+        # truncate：清空全表
+        OrmModel.truncate()
+        assert OrmModel.list() == []
+    finally:
+        teardown_plugin_database("OrmPlugin")

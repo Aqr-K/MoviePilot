@@ -327,14 +327,17 @@ class _PluginBase(metaclass=ABCMeta):
         """
         声明本插件【自管理】的数据库模型类（插件自有表，声明式注册）。
 
-        返回继承自 build_plugin_base(本插件ID) 的 ORM 模型【类】列表（非实例）。
+        返回继承自 build_plugin_base()（**无需传 id**）的 ORM 模型【类】列表（非实例）。
         这些模型挂在插件专属的独立 MetaData 上，落到插件独立的 .db 文件 / schema，
-        与核心库及其它插件完全隔离；框架（PluginManager 启停）据此自动建表/卸载删库，
-        无需插件自行管理 Engine/Session。默认不声明任何表。
+        与核心库及其它插件完全隔离；框架（PluginManager 启停）按插件实例类名自动判断
+        plugin_id、据此自动建表/卸载删库，无需插件自行管理 Engine/Session。本钩子即「向框架
+        注册本插件 MetaData」的接口（id 由框架自动判断，插件无需、也无从误传）。默认不声明任何表。
 
-        用法：在插件模块内 `PluginBase = build_plugin_base(self.__class__.__name__)`，
-        定义 `class XxxModel(PluginBase): ...`，再于此返回 `[XxxModel, ...]`；
-        读写用 `self.get_plugin_db().session()`（即「自会话管理」）。
+        用法：在插件模块顶层 `PluginBase = build_plugin_base()`，定义
+        `class XxxModel(PluginBase): ...`，再于此返回 `[XxxModel, ...]`；读写用模型自带的
+        自会话 ORM `XxxModel(...).create()` / `.list()` / `.get(id)` / `.update({...})` /
+        `.delete(id)`（绑定本插件独立库，自动取会话/提交/清理）。如需原始 Session 见
+        `get_plugin_db().session()`。
 
         [XxxModel, YyyModel, ...]
         """
@@ -422,8 +425,11 @@ class _PluginBase(metaclass=ABCMeta):
         获取本插件【独立】的数据库容器（按插件类名自动注册，幂等）。
 
         返回 app.db.manager.PluginDatabase（持有插件专属 Engine + ScopedSession，
-        落 PLUGIN_DATA_PATH/<plugin_id>/<plugin_id>.db）。配合 provides_models()
-        声明的模型，用 `self.get_plugin_db().session()` 进行读写（自会话管理）。
+        落 PLUGIN_DATA_PATH/<plugin_id>/<plugin_id>.db）。
+
+        常规读写【优先】用模型自带的自会话 ORM（`Model(...).create()` / `.list()` /
+        `.get(id)` / `.delete(id)`，见 provides_models 说明）；本方法用于需要【原始 Session】
+        的进阶场景，如自定义复杂查询/批量事务：`with self.get_plugin_db().session() as s: ...`。
         """
         from app.db.manager import db_manager
         return db_manager.register_plugin(self.__class__.__name__)

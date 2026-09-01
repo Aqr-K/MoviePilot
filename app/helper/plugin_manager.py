@@ -108,6 +108,13 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 plugin_obj = plugin()
                 # 生效插件配置
                 plugin_obj.init_plugin(self.get_plugin_config(plugin_id))
+                # 为声明了 provides_models 的插件创建其自管理的独立数据库表（启动/安装主路径，
+                # create_all/迁移均幂等；失败不影响插件其它功能的加载）
+                try:
+                    from app.db.plugin import setup_plugin_database
+                    setup_plugin_database(plugin_obj)
+                except Exception as db_err:
+                    logger.error(f"初始化插件 {plugin_id} 自管理数据库出错：{str(db_err)} - {traceback.format_exc()}")
                 # 存储运行实例
                 self._running_plugins[plugin_id] = plugin_obj
                 logger.info(f"加载插件：{plugin_id} 版本：{plugin_obj.plugin_version}")
@@ -139,7 +146,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             from app.db.plugin import setup_plugin_database
             setup_plugin_database(plugin)
         except Exception as err:
-            logger.error(f"初始化插件 {plugin_id} 自管理数据库出错：{str(err)}")
+            logger.error(f"初始化插件 {plugin_id} 自管理数据库出错：{str(err)} - {traceback.format_exc()}")
         # 检查插件状态并启用/禁用事件处理器
         if plugin.get_state():
             # 启用插件类的事件处理器
@@ -849,15 +856,18 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         删除插件数据
         :param pid: 插件ID
         """
-        if not self._plugins.get(pid):
-            return False
-        PluginDataOper().del_data(pid)
-        # 删除插件自管理的独立数据库（释放容器并删除 .db 文件，失败不影响数据清理结果）
+        # 删除插件自管理的独立数据库（释放容器并删除 .db 文件/schema）。teardown 对 plugin_id
+        # 负责、不依赖运行态实例，须在 _plugins 存在性守卫之前无条件执行——否则 reset 流程
+        # （先 stop() 把插件移出 _plugins，再删数据）会命中下方守卫早返回，漏删插件库，
+        # 导致旧库/旧数据残留、「重置数据」语义被破坏（drop_plugin 对未注册 pid 静默幂等）。
         try:
             from app.db.plugin import teardown_plugin_database
             teardown_plugin_database(pid)
         except Exception as err:
-            logger.error(f"删除插件 {pid} 自管理数据库出错：{str(err)}")
+            logger.error(f"删除插件 {pid} 自管理数据库出错：{str(err)} - {traceback.format_exc()}")
+        if not self._plugins.get(pid):
+            return False
+        PluginDataOper().del_data(pid)
         return True
 
     def get_plugin_state(self, pid: str) -> bool:
