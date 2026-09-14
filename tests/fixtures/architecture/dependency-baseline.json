@@ -1077,8 +1077,8 @@
       "runtime_only": true
     }
   },
-  "edge_count": 8686,
-  "edge_sha256": "ac6a970bf860630eb855765577b9fa10ceb1a7f4513c24b45abdf8752170ded9",
+  "edge_count": 8687,
+  "edge_sha256": "532161ed0730b90f941e233640363374829fd604e0de7f9b5b6221cf753721d8",
   "edges": [
     "app -> app.foundation",
     "app -> app.foundation.environment",
@@ -9124,6 +9124,7 @@
     "app.startup.composition.plugin -> app.runtime",
     "app.startup.composition.plugin -> app.runtime.extensions",
     "app.startup.composition.plugin -> app.runtime.extensions.plugin",
+    "app.startup.composition.plugin -> app.runtime.extensions.plugin.readiness",
     "app.startup.composition.plugin -> app.runtime.extensions.plugin.version",
     "app.startup.composition.plugin -> app.runtime.settings",
     "app.startup.composition.resource -> app.adapters",
@@ -9767,7 +9768,7 @@
     "app.workflow.actions.transfer_file -> app.workflow",
     "app.workflow.actions.transfer_file -> app.workflow.actions"
   ],
-  "module_count": 1021,
+  "module_count": 1022,
   "modules": [
     "app",
     "app.adapters",
@@ -10619,6 +10620,7 @@
     "app.runtime.extensions.plugin.monitor",
     "app.runtime.extensions.plugin.paths",
     "app.runtime.extensions.plugin.projection",
+    "app.runtime.extensions.plugin.readiness",
     "app.runtime.extensions.plugin.registry",
     "app.runtime.extensions.plugin.runtime",
     "app.runtime.extensions.plugin.storage",

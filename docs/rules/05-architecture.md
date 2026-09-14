@@ -1155,6 +1155,7 @@ driven workflow registration.
 | `app/runtime/extensions/plugin/monitor.py` | Plugin file-change aggregation and monitor-thread lifecycle |
 | `app/runtime/extensions/plugin/projection.py` | Plugin commands, APIs, services, modules and actions projected from a running-registry snapshot |
 | `app/runtime/extensions/plugin/storage.py` | Injected plugin configuration/data persistence port; runtime code does not import DB Oper classes |
+| `app/runtime/extensions/plugin/readiness.py` | Standard-library-only static verdict on whether a plugin's source style supports multi-version coexistence (self-referential absolute imports, cross-plugin imports, host shared declarative-base models); it never imports plugin code and is injected into the package adapter by the composition root |
 | `app/application/plugin/catalog.py` | Plugin-market mapping, concurrent collection, generation merge, source/version deduplication and API catalog projection |
 | `app/application/plugin/install.py` | Compatibility, package installation, reporting, installed-list persistence and runtime reload command |
 | `app/application/plugin/routes.py` | Dynamic plugin-route registry protocol and registration/removal use cases; plugin response payloads remain raw unless the plugin chooses its own envelope |

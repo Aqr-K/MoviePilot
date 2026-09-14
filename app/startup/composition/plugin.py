@@ -17,6 +17,7 @@ from app.adapters.system.plugin.package import (
     PluginInstallVersionTarget,
     PluginPackageManager,
 )
+from app.runtime.extensions.plugin.readiness import plugin_multi_version_blockers
 from app.runtime.extensions.plugin.version import (
     PLUGIN_FALLBACK_VERSION,
     ensure_plugin_version_dir_available,
@@ -25,6 +26,7 @@ from app.runtime.extensions.plugin.version import (
     read_declared_plugin_version,
     register_plugin_version,
     remove_plugin_installed_version,
+    resolve_plugin_version_dir,
 )
 from app.runtime.settings import get_runtime_setting
 
@@ -96,6 +98,49 @@ def _rollback_plugin_install_version(
     remove_plugin_installed_version(plugin_dir, version, previous_current)
 
 
+def _reject_incompatible_plugin_version_switch(
+    plugin_id: str,
+    plugin_dir: Path,
+    source_dir: Path,
+) -> Optional[str]:
+    """判定插件从已装版本切换到另一版本能否被安装期接受。
+
+    只在插件已经是版本目录布局、且本次声明版本号确实变化时才体检：平铺布局下整个插件根目录
+    被本次内容整体换入，磁盘上不会留下第二份源码，谈不上并存；同版本重新同步是开发闭环的日常
+    操作，不是在装另一个版本，不值得为它扫描全部源码。命中自引用绝对导入或宿主共享声明基类
+    建模时拒绝安装：这两类写法在真正的多版本并存下必然失败，把故障从运行期提前到安装时，
+    而不是等版本目录攒够了才在加载时炸开。
+
+    这个组合只能落在组合根——版本目录布局与并存写法体检都属于运行时扩展包，适配器层不得引用，
+    只能由组合根装配成端口注入。
+
+    :param plugin_id: 插件ID
+    :param plugin_dir: 插件根目录；尚未安装任何源码时不体检
+    :param source_dir: 待安装的插件源码目录
+    :return: 拒绝说明；无需拒绝时为 None
+    """
+    # 已装源码要按当前布局解析：插件迁到版本目录布局后根目录不再有 __init__.py，
+    # 直接判根目录会让这道守卫从此每次都放行，正好从第二个版本开始永久失效
+    installed_init = resolve_plugin_version_dir(plugin_dir) / "__init__.py"
+    if not installed_init.is_file():
+        return None
+    installed_version = read_declared_plugin_version(installed_init)
+    incoming_version = read_declared_plugin_version(source_dir / "__init__.py")
+    if not installed_version or not incoming_version or installed_version == incoming_version:
+        return None
+    on_disk = plugin_version_dirs(plugin_dir)
+    coexisting = [directory for version, directory in sorted(on_disk.items()) if version != incoming_version]
+    if not coexisting:
+        return None
+    blockers = plugin_multi_version_blockers(plugin_id.lower(), [*coexisting, source_dir])
+    if not blockers:
+        return None
+    return (
+        f"插件 {plugin_id} 的写法不支持多版本并存，拒绝从 {installed_version} 版本切换到 "
+        f"{incoming_version} 版本：" + "；".join(blockers)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PluginMarketComposition:
     """保存插件市场相关 Transport、Client、Package 和 Dependency owner。"""
@@ -130,6 +175,7 @@ def compose_plugin_market(
             install_target_resolver=_resolve_plugin_install_target,
             install_version_registrar=_register_plugin_install_version,
             install_version_rollback=_rollback_plugin_install_version,
+            version_switch_guard=_reject_incompatible_plugin_version_switch,
         ),
         dependency=PluginDependencyInstaller(
             health,

@@ -43,6 +43,16 @@ from app.runtime.log import logger
 from app.runtime.settings import get_runtime_setting
 from app.runtime.version import get_app_version
 
+# 判定插件从已装版本切换到另一版本能否被安装期接受：(插件ID, 插件根目录, 待装源码目录)
+# 返回拒绝说明或 None。版本目录布局与并存写法体检都属于运行时扩展包，适配器层不得引用，
+# 因此只能由组合根注入
+VersionSwitchGuard = Callable[[str, Path, Path], Optional[str]]
+
+
+def _allow_version_switch(_pid: str, _plugin_dir: Path, _source_dir: Path) -> Optional[str]:
+    """未装配并存检查端口时不拦截安装，保持今天的单版本行为。"""
+    return None
+
 
 class PluginContentSwapError(OSError):
     """插件内容换入失败，并随异常携带运行目录的实际恢复结论。
@@ -267,12 +277,13 @@ class PluginPackageManager:
         install_target_resolver: InstallTargetResolver = _flat_install_target,
         install_version_registrar: InstallVersionRegistrar = _noop_version_registrar,
         install_version_rollback: InstallVersionRollback = _noop_version_rollback,
+        version_switch_guard: VersionSwitchGuard = _allow_version_switch,
     ) -> None:
-        """保存外部来源端口、依赖健康 owner 和版本目录布局相关的注入端口。
+        """保存外部来源端口、依赖健康 owner、版本目录布局端口和版本切换守卫。
 
-        目标目录决策、版本元信息登记和失败回滚都要读写版本目录布局，那是运行时
-        扩展包的职责，适配器层不允许引用它，因此只接受可注入的端口；未注入时全部
-        退化为单版本平铺覆盖安装，与引入版本目录之前逐字一致。
+        目标目录决策、版本元信息登记、失败回滚和并存写法体检都要读写版本目录布局，
+        那是运行时扩展包的职责，适配器层不允许引用它，因此只接受可注入的端口；未注入
+        时全部退化为单版本平铺覆盖安装且不拦截，与引入版本目录之前逐字一致。
 
         :param source: 市场元数据与制品来源端口
         :param health: 依赖健康 owner
@@ -280,6 +291,7 @@ class PluginPackageManager:
         :param install_target_resolver: 判定暂存内容落盘子目录的端口
         :param install_version_registrar: 登记已落盘版本元信息的端口
         :param install_version_rollback: 安装失败时回滚单个版本目录的端口
+        :param version_switch_guard: 判定版本切换能否被接受的端口
         """
         self._source = source
         self._health = health or PluginRuntimeHealth()
@@ -287,6 +299,7 @@ class PluginPackageManager:
         self._install_target_resolver = install_target_resolver
         self._install_version_registrar = install_version_registrar
         self._install_version_rollback = install_version_rollback
+        self._version_switch_guard = version_switch_guard
 
     def _require_source(self) -> PluginPackageSourcePort:
         """返回已装配来源端口，未完成组合时拒绝执行包写入。"""
@@ -1880,9 +1893,10 @@ class PluginPackageManager:
         source_label: str = "market",
     ) -> tuple[bool, str]:
         """
-        同步安装统一流程：暂存内容→备份→落位→安装依赖→上报
+        同步安装统一流程：暂存内容→并存检查→备份→落位→安装依赖→上报
         prepare_content 负责把插件文件放到调用时给定的暂存目录；只有新内容在暂存
-        目录里完整就位后才会触碰插件根目录，因此下载或解压失败时已装插件原样保留。
+        目录里完整就位且并存检查通过后才会触碰插件根目录，因此下载、解压或写法体检
+        失败时已装插件原样保留。
         落位既包含既有的原子换入，也包含版本化布局下的目标目录决策与版本元信息登记。
         """
         plugin_dir = self.__plugin_dir(pid)
@@ -1893,6 +1907,11 @@ class PluginPackageManager:
                 # 插件根目录此刻尚未被触碰，已装插件天然完整，无需还原也无需清理
                 logger.error(f"{pid} 准备插件内容失败：{message}")
                 return False, message
+
+            rejection = self._version_switch_guard(pid, plugin_dir, staging_dir)
+            if rejection:
+                logger.warning(f"{pid} 安装被并存检查拒绝：{rejection}")
+                return False, rejection
 
             backup_dir = None
             if not force_install:
@@ -2498,9 +2517,9 @@ class PluginPackageManager:
         source_label: str = "market",
     ) -> tuple[bool, str]:
         """
-        异步安装统一流程：暂存内容→备份→落位→安装依赖→上报
+        异步安装统一流程：暂存内容→并存检查→备份→落位→安装依赖→上报
         prepare_content 负责把插件文件放到调用时给定的暂存目录；只有新内容在暂存
-        目录里完整就位后才会触碰插件根目录，落位与中断语义与同步流程一致。
+        目录里完整就位且并存检查通过后才会触碰插件根目录，落位与中断语义与同步流程一致。
         """
         plugin_dir = self.__plugin_dir(pid)
         staging_dir = self.__new_install_staging_dir(pid)
@@ -2511,6 +2530,14 @@ class PluginPackageManager:
                 # 插件根目录此刻尚未被触碰，已装插件天然完整，无需还原也无需清理
                 logger.error(f"{pid} 准备插件内容失败：{message}")
                 return False, message
+
+            # 并存检查递归解析全部版本源码，属于阻塞 IO，必须让出事件循环
+            rejection = await _await_thread_operation(
+                self._version_switch_guard, pid, plugin_dir, staging_dir
+            )
+            if rejection:
+                logger.warning(f"{pid} 安装被并存检查拒绝：{rejection}")
+                return False, rejection
 
             if not force_install:
                 backup_dir = await self.__async_backup_plugin(pid)
