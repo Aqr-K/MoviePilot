@@ -61,7 +61,7 @@ def _lifecycle(*, plugin_class: type, running: dict) -> PluginLifecycle:
     return PluginLifecycle(
         classes={"DemoPlugin": plugin_class},
         running=running,
-        load_plugins=lambda _plugin_id, _loadable, _check: [plugin_class],
+        load_plugins=lambda _plugin_id, _loadable, _check, _version=None: [plugin_class],
         loadable_plugins=lambda: ["DemoPlugin"],
         plugin_config=lambda _plugin_id: {},
         auth_checker=lambda _plugin: True,

@@ -273,6 +273,20 @@ Purpose: Uninstall one plugin and remove it from the installed set.
 - `query`: none
 - `body`: none
 
+### `plugin.version.overview`
+`GET /api/v1/plugin/versions/{plugin_id}`; policy effect: `safe_read`.
+Purpose: List one plugin's installed source versions and, for every instance including the plugin itself, the version it is pinned to and the version it is actually running.
+- `path_params`: `plugin_id*` (string): Exact installed or marketplace plugin ID.
+- `query`: none
+- `body`: none
+
+### `plugin.version.set`
+`PUT /api/v1/plugin/versions/{plugin_id}/{instance_id}`; policy effect: `reversible_write`.
+Purpose: Pin one plugin instance to an installed version, or clear the pin so it follows the plugin's current version; either way the instance is stopped and started again.
+- `path_params`: `instance_id*` (string): Exact plugin instance ID returned by plugin.loglevel.get.; `plugin_id*` (string): Exact installed or marketplace plugin ID.
+- `query`: none
+- `body`: `pinned_version` (string|null): Installed plugin version this instance is pinned to; omit or send null to follow the plugin's current version.
+
 ## Body Models
 
 This category document is self-contained: the shared models below are included so the Agent does not need a second Skill document before calling the API.

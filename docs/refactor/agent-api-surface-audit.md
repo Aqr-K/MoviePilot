@@ -5,10 +5,10 @@
 
 ## Result
 
-- OpenAPI HTTP operations: **409**
-- Stable `moviepilot_api` operations: **229**
-- Exact HTTP routes used by the gateway: **227**
-- OpenAPI routes matched directly by the gateway: **226**
+- OpenAPI HTTP operations: **411**
+- Stable `moviepilot_api` operations: **231**
+- Exact HTTP routes used by the gateway: **229**
+- OpenAPI routes matched directly by the gateway: **228**
 - Bounded dynamic gateway routes: **1**
 - Every gateway operation has a generated English oneOf input contract in MCP `tools/list` and `skills/moviepilot-api/SKILL.md`.
 - Every non-gateway OpenAPI operation is listed below with an explicit ownership boundary; it is not silently callable through arbitrary URL/method input.
@@ -19,7 +19,7 @@
 | :--- | ---: | :--- |
 | `alternate-auth-duplicate` | 11 | API-token compatibility duplicate of a bearer-authenticated capability. |
 | `consolidated` | 71 | Source/UI route represented by a stable aggregate Agent operation. |
-| `gateway` | 226 | Approved structured MoviePilot Agent operation. |
+| `gateway` | 228 | Approved structured MoviePilot Agent operation. |
 | `provider-skill` | 12 | Low-level downloader or media-server capability owned by a provider Skill. |
 | `stream_or_binary` | 10 | Streaming or binary response owned by a direct client transport. |
 | `transport_or_identity` | 66 | Authentication, protocol, callback, account, or conversation transport boundary. |
@@ -235,6 +235,8 @@
 | `POST` | `/api/v1/plugin/source/{plugin_id}/install` | plugin | `gateway` | plugin.source.install | 按明确来源安装插件 |
 | `GET` | `/api/v1/plugin/source/{plugin_id}/options` | plugin | `consolidated` | plugin.source.options | 获取插件来源候选 |
 | `GET` | `/api/v1/plugin/statistic` | plugin | `gateway` | plugin.statistics | 插件安装统计 |
+| `GET` | `/api/v1/plugin/versions/{plugin_id}` | plugin | `gateway` | plugin.version.overview | 查询插件已装版本与实例版本绑定 |
+| `PUT` | `/api/v1/plugin/versions/{plugin_id}/{instance_id}` | plugin | `gateway` | plugin.version.set | 设置插件实例的版本绑定 |
 | `DELETE` | `/api/v1/plugin/{plugin_id}` | plugin | `gateway` | plugin.uninstall | 卸载插件 |
 | `GET` | `/api/v1/plugin/{plugin_id}` | plugin | `consolidated` | plugin.config.get | 获取插件配置 |
 | `PUT` | `/api/v1/plugin/{plugin_id}` | plugin | `gateway` | plugin.config.update | 更新插件配置 |

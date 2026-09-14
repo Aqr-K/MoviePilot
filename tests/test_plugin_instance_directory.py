@@ -14,6 +14,7 @@ def _record(instance_id: str, source_plugin_id: str) -> SimpleNamespace:
         plugin_name=None,
         plugin_desc=None,
         plugin_icon=None,
+        pinned_version=None,
         is_default_target=False,
         is_enabled=True,
     )

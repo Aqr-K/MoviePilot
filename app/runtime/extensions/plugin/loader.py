@@ -184,16 +184,36 @@ class PluginLoader:
         self,
         instance: PluginInstance,
         validator: PluginValidator,
+        *,
+        version: Optional[str] = None,
     ) -> list[Any]:
         """在实例专属模块命名空间中重新执行源插件代码并返回适配类。
 
-        源码目录按源插件的当前版本解析，而不是直接取插件根目录：实例是源插件
-        代码在另一个模块命名空间下的再次执行，取到的源码必须与本体加载的是
-        同一份，否则实例与本体会分处不同版本目录。
+        源码目录按本次的期望版本解析，而不是直接取插件根目录：实例是源插件代码在
+        另一个模块命名空间下的再次执行，取到的源码必须确实是它期望的那一份。期望
+        版本的来源有两处——显式传入 ``version`` 时以其为准，供版本切换失败后以某个
+        具体版本重试；否则按实例自身的绑定解析，跟随当前版本时取清单登记的当前版本，
+        钉住时取钉住的那个版本。
+
+        钉住的版本目录已不在磁盘上时视为绑定已失效，记警告后回落到当前版本，而不是
+        让整个实例加载失败：绑定是一条可以被版本回收或手工删目录改写的旁路事实，
+        不该比插件本身能否加载有更高的权重。
+
+        :param instance: 待加载的实例描述
+        :param validator: 候选类是否满足宿主插件契约的校验函数
+        :param version: 显式指定加载的版本号，为空时按实例自身的绑定解析
+        :return: 通过校验的适配类列表；源码缺失或运行时不兼容时为空列表
         """
-        source_dir = resolve_plugin_version_dir(
-            self._plugins_root / instance.source_plugin_id.lower()
-        )
+        plugin_dir = self._plugins_root / instance.source_plugin_id.lower()
+        desired_version = version if version is not None else instance.pinned_version
+        try:
+            source_dir = resolve_plugin_version_dir(plugin_dir, desired_version)
+        except ValueError as error:
+            self._logger.warning(
+                f"虚拟插件实例 {instance.instance_id} 绑定的版本目录不存在，"
+                f"回落到插件当前版本：{error}"
+            )
+            source_dir = resolve_plugin_version_dir(plugin_dir)
         source_file = source_dir / "__init__.py"
         if not source_file.exists():
             self._logger.warning(

@@ -69,6 +69,12 @@ class PluginInstance(BaseModel):
     plugin_name: Optional[str] = Field(default=None, description="实例展示名称")
     plugin_desc: Optional[str] = Field(default=None, description="实例展示描述")
     plugin_icon: Optional[str] = Field(default=None, description="实例展示图标")
+    # 单列即绑定：为空即跟随，非空即锚定，非法状态无从表示。拆成「版本号 + 是否跟随」
+    # 两列会要求二者始终一致，失步时绑定静默落空
+    pinned_version: Optional[str] = Field(
+        default=None,
+        description="锚定的插件版本；为空表示跟随插件当前版本",
+    )
     is_default_target: bool = Field(
         default=False,
         description="该实例是否为所属源插件的默认调用目标",
@@ -92,6 +98,72 @@ class PluginInstance(BaseModel):
     def mode(self) -> Literal["virtual", "host"]:
         """由一对身份 ID 派生实例角色，而非另存一份可能失步的副本。"""
         return "host" if self.is_host else "virtual"
+
+
+class PluginInstalledVersionInfo(BaseModel):  # type: ignore[misc]
+    """插件某个已装版本的落盘信息。"""
+
+    version: str = Field(description="版本号")
+    directory: str = Field(description="版本源码目录名")
+    installed_at: Optional[str] = Field(default=None, description="安装时间，ISO 格式")
+    source: Optional[str] = Field(
+        default=None, description="版本来源，如 market、local、migrated、discovered"
+    )
+    is_current: bool = Field(description="是否为版本元信息登记的当前版本")
+
+
+class PluginInstanceVersionBinding(BaseModel):  # type: ignore[misc]
+    """单个实例的版本绑定与运行状态。"""
+
+    instance_id: str = Field(description="实例 ID")
+    plugin_name: Optional[str] = Field(
+        default=None,
+        description="该实例的展示名称，取运行态注册名，取不到时回落到实例登记的名称",
+    )
+    pinned_version: Optional[str] = Field(
+        default=None,
+        description="锚定的插件版本；为空表示跟随插件当前版本",
+    )
+    running: bool = Field(description="该实例当前是否运行中")
+    running_version: Optional[str] = Field(
+        default=None,
+        description="该实例当前实际加载的插件版本；未运行时为空",
+    )
+    is_host: bool = Field(
+        default=False, description="是否为源插件本体自身，而非共享其源码的分身"
+    )
+    is_default_target: bool = Field(
+        default=False, description="该实例是否为所属源插件的默认调用目标"
+    )
+    is_enabled: bool = Field(
+        default=True,
+        description="该实例是否应当被实例化并启动；与 running 不同，后者说的是此刻在不在跑",
+    )
+
+
+class PluginVersionOverview(BaseModel):  # type: ignore[misc]
+    """插件已装版本总览与各实例的版本绑定。"""
+
+    plugin_id: str = Field(description="插件 ID")
+    current_version: Optional[str] = Field(
+        default=None, description="版本元信息登记的当前版本"
+    )
+    installed_versions: List[PluginInstalledVersionInfo] = Field(
+        default_factory=list, description="已装版本列表，按版本号升序排列"
+    )
+    instances: List[PluginInstanceVersionBinding] = Field(
+        default_factory=list,
+        description="引用该插件源码的各实例版本绑定，首项固定为源插件本体自身",
+    )
+
+
+class PluginInstanceVersionUpdateRequest(BaseModel):  # type: ignore[misc]
+    """设置实例版本绑定的请求参数。"""
+
+    pinned_version: Optional[str] = Field(
+        default=None,
+        description="锚定的插件版本，必须是已安装版本；为空表示改为跟随插件当前版本",
+    )
 
 
 class PluginInstanceEnabledRequest(BaseModel):  # type: ignore[misc]

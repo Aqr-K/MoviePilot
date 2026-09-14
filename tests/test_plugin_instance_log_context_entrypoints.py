@@ -37,7 +37,7 @@ def _lifecycle(*, plugins, running=None):
     lifecycle = PluginLifecycle(
         classes=classes,
         running=running,
-        load_plugins=lambda _pid, _installed, _check: list(plugins),
+        load_plugins=lambda _pid, _installed, _check, _version=None: list(plugins),
         loadable_plugins=lambda: ["DemoPluginWork"],
         plugin_config=lambda _pid: {},
         auth_checker=lambda _plugin: True,

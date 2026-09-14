@@ -10,8 +10,14 @@ from typing import Any, Optional
 from app.runtime.extensions.plugin.system import PluginSystemServices
 from app.runtime.extensions.plugin.version import (
     plugin_version_from_dir_name,
-    resolve_plugin_version_dir,
+    resolve_instance_version_dir,
 )
+from app.schemas.plugin import PluginInstance
+
+
+def _no_version_binding(_plugin_id: str) -> Optional[PluginInstance]:
+    """宿主尚未装配版本绑定查询端口时，按「一律跟随当前版本」解析。"""
+    return None
 
 
 class PluginPathResolver:
@@ -25,13 +31,15 @@ class PluginPathResolver:
         system: Callable[[], PluginSystemServices],
         strict_system_version: Callable[[], bool],
         log: Any,
+        get_instance: Callable[[str], Optional[PluginInstance]] = _no_version_binding,
     ) -> None:
-        """保存运行目录和插件市场路径解析端口。"""
+        """保存运行目录、插件市场路径解析与实例版本绑定查询端口。"""
         self._runtime_root = runtime_root.resolve()
         self._running = running
         self._system = system
         self._strict_system_version = strict_system_version
         self._logger = log
+        self._get_instance = get_instance
 
     def federated_change(
         self,
@@ -76,8 +84,12 @@ class PluginPathResolver:
                 return None
             plugin_dir = plugin_dir.resolve()
             # 联邦产物随源码一起落在版本目录里，遏制范围也要跟着收到版本目录，
-            # 否则一个版本的构建事件会被另一个版本的 dist 路径判定为越界
-            version_dir = resolve_plugin_version_dir(plugin_dir)
+            # 否则一个版本的构建事件会被另一个版本的 dist 路径判定为越界。按这个
+            # 运行实例自己的版本绑定解析而不是一律取当前版本：实例被钉在旧版本时
+            # 代码已经从旧版本目录加载，产物却按当前版本目录判定，两者分处两个版本
+            version_dir = resolve_instance_version_dir(
+                plugin_dir, self._get_instance(plugin_id)
+            )
             dist_dir = (version_dir / relative_dist_path).resolve()
             if (
                 dist_dir == version_dir

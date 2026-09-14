@@ -221,6 +221,7 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         self._plugin_metadata = self._plugin_runtime.metadata
         self._plugin_sync = self._plugin_runtime.sync
         self._plugin_clone = self._plugin_runtime.clone
+        self._plugin_version_binding = self._plugin_runtime.version_binding
         self._plugin_log_level = self._plugin_runtime.log_level
         self._plugin_default_target = self._plugin_runtime.default_target
         self._plugin_classification = self._plugin_runtime.classification
@@ -765,6 +766,31 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
     def get_plugin_instance(self, plugin_id: str) -> Optional[PluginInstance]:
         """返回指定虚拟插件实例描述，物理插件返回空。"""
         return self._plugin_instance_store.get(plugin_id)
+
+    def get_plugin_version_binding(self, plugin_id: str) -> Optional[PluginInstance]:
+        """返回该 ID 对应实例的版本绑定，分身优先、回落到源插件本体。
+
+        按版本目录取源码或静态资源时一律走这个入口：只查分身会让本体恒为空，资源随之
+        按当前版本解析，而代码已按本体钉住的版本加载，同一个插件的资源与代码就分处两个
+        版本目录。
+
+        :param plugin_id: 实例 ID 或源插件 ID
+        :return: 该实例的绑定记录；两侧都没有登记时为 None
+        """
+        return self._plugin_instance_store.get(
+            plugin_id
+        ) or self._plugin_instance_store.get_host(plugin_id)
+
+    def get_plugin_running_version(self, plugin_id: str) -> Optional[str]:
+        """返回运行实例实际加载的版本，未运行或缺少版本声明时为空。
+
+        「绑定到哪一版」与「此刻实际跑着哪一版」是两件事：绑定失效回落、切换失败回退
+        都会让两者分开，安装守卫与版本总览都要能读到后者。
+
+        :param plugin_id: 实例 ID 或源插件 ID
+        :return: 实际加载的版本号；未运行或无版本声明时为 None
+        """
+        return self._plugin_runtime.version_inventory.running_version(plugin_id)
 
     def get_plugin_source_id(self, plugin_id: str) -> str:
         """解析插件运行身份对应的源码身份，普通插件保持原值。"""
@@ -1340,6 +1366,40 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
                 "has_config": self._plugin_config_store.has_config(instance_id),
             })
         return results
+
+    def get_plugin_version_overview(self, plugin_id: str) -> Dict[str, Any]:
+        """
+        查询插件已装版本列表与各实例的版本绑定
+        :param plugin_id: 插件ID
+        :return: 含已装版本列表与本体、各分身绑定信息的字典
+        :raise LookupError: 插件不存在，或 plugin_id 实为某个分身自身的实例 ID
+        """
+        return self._plugin_version_binding.overview(plugin_id)
+
+    def set_plugin_instance_version(
+        self,
+        instance_id: str,
+        *,
+        pinned_version: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """
+        设置插件实例的版本绑定，并完成一次停止再启动
+        切换全程收在同一个可变事务与 quiesce 锁内：绑定落盘、停旧、起新、失败回退是
+        一串必须按序发生的步骤，中途被停机封口切开会留下一个停了却没起来的实例
+        :param instance_id: 实例ID，可以是分身实例 ID，也可以是源插件本体自身 ID
+        :param pinned_version: 锚定的目标版本号；为空表示改为跟随当前版本
+        :return: (是否成功, 成功时为实例ID／失败时为可读原因)
+        """
+        try:
+            with self.mutation(f"切换插件实例 {instance_id} 版本"):
+                with self._plugin_quiesce_lock:
+                    return self._plugin_version_binding.set_instance_version(
+                        instance_id,
+                        pinned_version=pinned_version,
+                    )
+        except PluginMutationRejectedError as error:
+            logger.warning(str(error))
+            return False, str(error)
 
     def get_plugin_instance_log_levels(self, plugin_id: str) -> List[Dict[str, Any]]:
         """

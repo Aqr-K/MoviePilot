@@ -574,6 +574,8 @@ API_EXTENDED_OPERATION_SPECS: tuple[ApiOperationSpec, ...] = (
     _write("plugin.default_target.set"),
     _write("plugin.default_target.clear"),
     _write("plugin.instance.set_enabled"),
+    _admin_read("plugin.version.overview", sensitivity=ResultSensitivity.PRIVATE),
+    _write("plugin.version.set"),
     # 彻底清理按勾选范围真删用户数据且不可回滚，与重置同档：要确认、且只能人工补救
     _write(
         "plugin.instance.purge",
@@ -846,6 +848,12 @@ API_OPERATION_ROUTES: dict[str, ApiOperationRoute] = {
     ),
     "plugin.instance.set_enabled": ApiOperationRoute(
         "POST", "/api/v1/plugin/instance/{instance_id}/enabled"
+    ),
+    "plugin.version.overview": ApiOperationRoute(
+        "GET", "/api/v1/plugin/versions/{plugin_id}"
+    ),
+    "plugin.version.set": ApiOperationRoute(
+        "PUT", "/api/v1/plugin/versions/{plugin_id}/{instance_id}"
     ),
     "plugin.instance.purge": ApiOperationRoute(
         "POST", "/api/v1/plugin/instance/{instance_id}/purge"

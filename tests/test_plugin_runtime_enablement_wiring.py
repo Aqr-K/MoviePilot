@@ -174,7 +174,7 @@ def test_targeted_load_does_not_start_a_disabled_clone(monkeypatch):
     monkeypatch.setattr(
         runtime.loader,
         "load_instance",
-        lambda instance, _validator: loaded.append(instance.instance_id) or [],
+        lambda instance, _validator, version=None: loaded.append(instance.instance_id) or [],
     )
 
     runtime.lifecycle.start("DemoPluginWork")
@@ -198,7 +198,7 @@ def test_targeted_load_still_starts_an_enabled_clone(monkeypatch):
     monkeypatch.setattr(
         runtime.loader,
         "load_instance",
-        lambda instance, _validator: loaded.append(instance.instance_id) or [],
+        lambda instance, _validator, version=None: loaded.append(instance.instance_id) or [],
     )
 
     runtime.lifecycle.start("DemoPluginWork")

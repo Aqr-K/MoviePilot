@@ -18,6 +18,7 @@ from app.runtime.extensions.plugin.version import (
     read_plugin_versions_manifest,
     register_plugin_version,
 )
+from app.schemas.plugin import PluginInstance
 from app.startup.composition.plugin import (
     _register_plugin_install_version as register_plugin_install_version,
 )
@@ -528,10 +529,80 @@ def test_version_switch_guard_allows_same_version_reinstall(tmp_path: Path) -> N
     assert _reject_incompatible_plugin_version_switch(GUARD_PLUGIN_ID, plugin_dir, source_dir) is None
 
 
-def test_version_switch_guard_rejects_switch_when_style_blocks_coexistence(tmp_path: Path) -> None:
-    """版本目录布局下切换到另一版本，写法阻断并存时必须拒绝并说明原因。"""
+def _bind_instances(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    host_pinned: str | None = None,
+    clone_pinned: tuple[str | None, ...] = (),
+    fail: bool = False,
+) -> None:
+    """把守卫看到的实例版本绑定替换为给定的本体与分身。
+
+    守卫在运行时物化之后才会被调到，它读的是实例表里真实的绑定；这里给出一个最小的
+    绑定视图，让「装完之后谁跑哪一版」这个判据可以被逐条构造出来。
+
+    :param monkeypatch: pytest monkeypatch 夹具
+    :param host_pinned: 本体钉住的版本号，None 表示跟随当前版本
+    :param clone_pinned: 各分身钉住的版本号，None 表示跟随当前版本
+    :param fail: 绑定查询是否抛出，用于验证判据未知时失败关闭
+    """
+
+    def _binding(plugin_id: str) -> PluginInstance:
+        """给出本体自身那一行的绑定视图。"""
+        if fail:
+            raise RuntimeError("实例表暂时不可读")
+        return PluginInstance(
+            instance_id=plugin_id,
+            source_plugin_id=plugin_id,
+            pinned_version=host_pinned,
+        )
+
+    manager = SimpleNamespace(
+        get_plugin_version_binding=_binding,
+        get_plugin_source_instances=lambda plugin_id: [
+            PluginInstance(
+                instance_id=f"{plugin_id}Work{index}",
+                source_plugin_id=plugin_id,
+                pinned_version=pinned,
+            )
+            for index, pinned in enumerate(clone_pinned)
+        ],
+    )
+    monkeypatch.setattr(
+        "app.application.plugin.runtime.get_existing_plugin_manager",
+        lambda: manager,
+    )
+
+
+def test_version_switch_guard_allows_upgrade_when_every_instance_follows_current(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """全部实例都跟随当前版本时装新版只是一次普通升级，旧目录尚未回收不算并存。"""
+    _bind_instances(monkeypatch, host_pinned=None, clone_pinned=(None,))
     plugin_dir = _versioned_plugin(tmp_path, {"1.0.0": ""})
-    source_dir = _staged_source(tmp_path, "2.0.0", "from app.plugins.guardplugin.utils import helper\n")
+    source_dir = _staged_source(tmp_path, "2.0.0", SELF_REFERENTIAL_IMPORT)
+
+    assert _reject_incompatible_plugin_version_switch(GUARD_PLUGIN_ID, plugin_dir, source_dir) is None
+
+
+def test_version_switch_guard_allows_upgrade_when_every_instance_is_pinned_to_the_old_version(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """全部实例都钉在旧版本时装新载荷只改 current，运行期仍只有一份源码在跑。"""
+    _bind_instances(monkeypatch, host_pinned="1.0.0", clone_pinned=("1.0.0",))
+    plugin_dir = _versioned_plugin(tmp_path, {"1.0.0": ""})
+    source_dir = _staged_source(tmp_path, "2.0.0", SELF_REFERENTIAL_IMPORT)
+
+    assert _reject_incompatible_plugin_version_switch(GUARD_PLUGIN_ID, plugin_dir, source_dir) is None
+
+
+def test_version_switch_guard_rejects_switch_when_style_blocks_coexistence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """本体跟随新版而分身钉在旧版时确实会并存，写法阻断即拒绝并说明原因。"""
+    _bind_instances(monkeypatch, host_pinned=None, clone_pinned=("1.0.0",))
+    plugin_dir = _versioned_plugin(tmp_path, {"1.0.0": ""})
+    source_dir = _staged_source(tmp_path, "2.0.0", SELF_REFERENTIAL_IMPORT)
 
     rejection = _reject_incompatible_plugin_version_switch(GUARD_PLUGIN_ID, plugin_dir, source_dir)
 
@@ -540,8 +611,11 @@ def test_version_switch_guard_rejects_switch_when_style_blocks_coexistence(tmp_p
     assert "自引用绝对导入" in rejection
 
 
-def test_version_switch_guard_rejects_switch_when_installed_version_blocks_coexistence(tmp_path: Path) -> None:
+def test_version_switch_guard_rejects_switch_when_installed_version_blocks_coexistence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """阻断写法在已装版本里时同样拒绝——并存要求全部参与版本都合规。"""
+    _bind_instances(monkeypatch, host_pinned=None, clone_pinned=("1.0.0",))
     plugin_dir = _versioned_plugin(
         tmp_path, {"1.0.0": "from app.db import Base\n\nclass MyData(Base):\n    pass\n"}
     )
@@ -553,8 +627,36 @@ def test_version_switch_guard_rejects_switch_when_installed_version_blocks_coexi
     assert "共享声明基类" in rejection
 
 
-def test_version_switch_guard_allows_switch_when_every_version_is_clean(tmp_path: Path) -> None:
-    """版本目录布局下写法全部合规时放行版本切换。"""
+def test_version_switch_guard_ignores_a_pinned_version_that_no_longer_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """钉住的版本目录已不在磁盘上时按加载器的回落口径计入新当前版本，不判成并存。"""
+    _bind_instances(monkeypatch, host_pinned=None, clone_pinned=("0.9.0",))
+    plugin_dir = _versioned_plugin(tmp_path, {"1.0.0": ""})
+    source_dir = _staged_source(tmp_path, "2.0.0", SELF_REFERENTIAL_IMPORT)
+
+    assert _reject_incompatible_plugin_version_switch(GUARD_PLUGIN_ID, plugin_dir, source_dir) is None
+
+
+def test_version_switch_guard_rejects_when_the_bindings_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """绑定查不出来就是判据未知，必须失败关闭而不是当成没有并存放行。"""
+    _bind_instances(monkeypatch, fail=True)
+    plugin_dir = _versioned_plugin(tmp_path, {"1.0.0": ""})
+    source_dir = _staged_source(tmp_path, "2.0.0", SELF_REFERENTIAL_IMPORT)
+
+    rejection = _reject_incompatible_plugin_version_switch(GUARD_PLUGIN_ID, plugin_dir, source_dir)
+
+    assert rejection is not None
+    assert "无法确认" in rejection
+
+
+def test_version_switch_guard_allows_switch_when_every_version_is_clean(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """确实会并存但写法全部合规时放行版本切换。"""
+    _bind_instances(monkeypatch, host_pinned=None, clone_pinned=("1.0.0",))
     plugin_dir = _versioned_plugin(tmp_path, {"1.0.0": "from .utils import helper\n"})
     source_dir = _staged_source(tmp_path, "2.0.0", "from .utils import helper\n")
 
@@ -726,6 +828,7 @@ def test_installing_a_new_version_runs_the_guard_and_lands_in_a_version_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """装新版本时守卫确实被调用，写法合规则照常落到新的版本目录。"""
+    _bind_instances(monkeypatch, host_pinned=None, clone_pinned=("1.0.0",))
     manager, plugin_dir, guard_calls = _fully_wired_manager(
         monkeypatch, tmp_path, incoming_body="from .utils import helper\n"
     )
@@ -742,6 +845,7 @@ def test_blocking_style_rejects_the_install_and_leaves_the_runtime_dir_untouched
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """体检不通过时安装被拒绝，运行目录一件不动：既没有新版本目录也没改元信息。"""
+    _bind_instances(monkeypatch, host_pinned=None, clone_pinned=("1.0.0",))
     manager, plugin_dir, guard_calls = _fully_wired_manager(
         monkeypatch, tmp_path, incoming_body=SELF_REFERENTIAL_IMPORT
     )
@@ -763,6 +867,7 @@ async def test_async_install_rejection_leaves_the_runtime_dir_untouched(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """异步安装把体检转交线程池后仍拿到同一个拒绝结论，运行目录同样一件不动。"""
+    _bind_instances(monkeypatch, host_pinned=None, clone_pinned=("1.0.0",))
     manager, plugin_dir, guard_calls = _fully_wired_manager(
         monkeypatch, tmp_path, incoming_body=SELF_REFERENTIAL_IMPORT
     )

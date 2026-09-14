@@ -12,6 +12,10 @@ from app.foundation.version import compare_version
 from app.runtime.events import eventmanager
 from app.runtime.extensions.plugin.access import PluginAccessPolicy
 from app.runtime.extensions.plugin.admission import PluginMutationAdmission
+from app.runtime.extensions.plugin.binding import (
+    PluginVersionBinding,
+    PluginVersionInventory,
+)
 from app.runtime.extensions.plugin.catalog import PluginCatalogFacade
 from app.runtime.extensions.plugin.classification import PluginClassificationRegistry
 from app.runtime.extensions.plugin.clone import PluginCloneService
@@ -39,6 +43,7 @@ from app.runtime.extensions.plugin.sync import (
 from app.runtime.extensions.plugin.system import PluginSystemServices
 from app.runtime.extensions.plugin.target import PluginDefaultTargetControl
 from app.runtime.extensions.plugin.tools import PluginToolCatalog
+from app.schemas.plugin import PluginInstance
 from app.schemas.types import SystemConfigKey
 
 
@@ -106,6 +111,11 @@ class PluginRuntimeEnvironment:
     # 原子写入端口，不经过按实例逐行读写的实例表端口
     set_default_target: Callable[[str, str], bool]
     clear_default_target: Callable[[str], None]
+    # 版本切换后要重建该实例的定时任务、命令与动态路由：新版本声明的这三样都可能与
+    # 旧版本不同，不刷新就会留下指向已停实例的旧注册。刷新动作落在 Application 层，
+    # 运行时扩展包不得反向 import，因此只能由组合根注入；未注入时静默跳过，供裸运行
+    # 时与单元测试构造一个不带宿主注册面的 Runtime
+    refresh_registrations: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,12 +138,56 @@ class PluginRuntime:
     metadata: PluginMetadataMapper
     sync: PluginSyncService
     clone: PluginCloneService
+    version_inventory: PluginVersionInventory
+    version_binding: PluginVersionBinding
     log_level: PluginLogLevelControl
     default_target: PluginDefaultTargetControl
     projection: PluginProjection
     classification: PluginClassificationRegistry
     recent_local_sync: dict[str, float]
     system: Callable[[], PluginSystemServices]
+
+
+def _stop_plugin_for_version_binding(
+    lifecycle: PluginLifecycle,
+    plugin_id: str,
+) -> bool:
+    """只在旧实例完全收敛后才结束它，并把结果显式返回给版本绑定服务。
+
+    ``PluginLifecycle.stop`` 为兼容旧调用方保留了无返回值 ABI，并且采用强制 finalize
+    语义——它会在 ``stop_service`` 失败时照样把实例摘掉。版本切换不能把一个没停干净的
+    实例当成已停止：后续启动会覆盖注册表，旧实例留下的定时任务与事件订阅从此再没有
+    句柄能停。因此这里改走两阶段生命周期端口，quiesce 成功才允许 finalize。
+
+    :param lifecycle: 生命周期 owner
+    :param plugin_id: 待停止的实例 ID
+    :return: 旧实例是否已经完全停止
+    """
+    if not lifecycle.quiesce(plugin_id):
+        return False
+    return bool(lifecycle.finalize(plugin_id))
+
+
+def _plugin_package_write_probe(host: PluginRuntimeHost) -> Callable[[str], bool]:
+    """把宿主的包写入抑制窗口适配成「安装是否在途」判据。
+
+    包写入窗口正是插件目录内容会被换入换出的那段时间，此刻切版本可能落到一份写了
+    一半的源码上，因此拒绝切换比接受它更便宜。窗口在文件事件收敛前会多保留几秒，
+    判据因而偏保守——多拒绝几秒钟的切换请求，而不是放进一次撞上安装的切换。
+
+    宿主没有提供这个能力时（裸运行时、单元测试替身）返回恒假：那种接线根本没有安装
+    流程，按在途处理会让版本切换永远打不开。
+
+    注意这只是一次读取，不是互斥：探测之后到真正启动之间仍可能开始一次安装。真正的
+    互斥需要包写入锁，那属于版本回收那一层要解决的问题。
+
+    :param host: 插件宿主生命周期门面
+    :return: 按插件 ID 判定安装是否在途的函数
+    """
+    suppressed = getattr(host, "is_plugin_monitor_suppressed", None)
+    if not callable(suppressed):
+        return lambda _plugin_id: False
+    return lambda plugin_id: bool(suppressed(plugin_id))
 
 
 def build_plugin_runtime(
@@ -158,11 +212,18 @@ def build_plugin_runtime(
         verify_keys=RSAUtils.verify_rsa_keys,
         log=environment.logger,
     )
+
+    def host_pinned_version(plugin_id: str) -> Optional[str]:
+        """读取源插件本体钉住的版本号，未登记或跟随当前版本时为 None。"""
+        host_instance = instances.get_host(plugin_id)
+        return host_instance.pinned_version if host_instance is not None else None
+
     loader = PluginLoader(
         plugins_root=environment.plugins_root,
         import_preparer=environment.import_preparer,
         import_scanner=environment.import_scanner,
         log=environment.logger,
+        host_binding=host_pinned_version,
     )
     tools = PluginToolCatalog(max_attempts=tool_build_max_attempts)
     classification = PluginClassificationRegistry(environment.logger)
@@ -181,6 +242,7 @@ def build_plugin_runtime(
         plugin_id: Optional[str],
         loadable_plugins: list[str],
         validator: Callable[[Any], bool],
+        version: Optional[str] = None,
     ) -> list[Any]:
         """加载物理插件或虚拟实例，并保持持久化实例顺序。
 
@@ -188,13 +250,18 @@ def build_plugin_runtime(
         （含停用的），加载器在收到具体插件 ID 时也只按这个 ID 找目录、不看可装载
         清单；两处叠在一起，源码变更触发的实例树重载、按 ID 发起的重载就会绕过启用
         判据，把用户停用的实例又拉起来跑到下次重启。
+
+        ``version`` 只在按单个分身实例 ID 加载时生效，供版本切换失败后以某个具体版本
+        重试；批量加载时各实例一律按自身绑定解析，一个全局版本号对不同插件没有意义。
+        本体不走这个形参——它的源码目录由 ``loader.load`` 按持久化绑定解析，切换时
+        锚定值已经先落了盘。
         """
         if plugin_id:
             instance = instances.get(plugin_id)
             if instance:
                 if not instance.is_enabled:
                     return []
-                return loader.load_instance(instance, validator)
+                return loader.load_instance(instance, validator, version=version)
             if not any(
                 loadable.casefold() == plugin_id.casefold()
                 for loadable in loadable_plugins
@@ -279,12 +346,24 @@ def build_plugin_runtime(
         runtime_status=registry.runtime_status,
         log=environment.logger,
     )
+    def version_binding_of(plugin_id: str) -> Optional[PluginInstance]:
+        """读取该 ID 对应实例的版本绑定，分身优先、回落到源插件本体。
+
+        只查分身会让本体恒为空，静态资源随之按当前版本解析，而代码已按本体钉住的
+        版本加载——同一个插件的资源与代码分处两个版本目录。
+
+        :param plugin_id: 实例 ID 或源插件 ID
+        :return: 该实例的绑定记录；两侧都没有登记时为 None
+        """
+        return instances.get(plugin_id) or instances.get_host(plugin_id)
+
     paths = PluginPathResolver(
         runtime_root=environment.plugins_root,
         running=lambda: registry.running,
         system=environment.system,
         strict_system_version=lambda: not environment.development(),
         log=environment.logger,
+        get_instance=version_binding_of,
     )
     recent_local_sync: dict[str, float] = {}
     local_sync = LocalPluginSyncService(
@@ -408,6 +487,29 @@ def build_plugin_runtime(
         remove_plugin=host.remove_plugin,
         log=environment.logger,
     )
+    version_inventory = PluginVersionInventory(
+        plugins_root=environment.plugins_root,
+        # 这里刻意用在册判据而不是类注册表：某插件的全部实例都被停用后重启，注册表里
+        # 就没有它的类了，但它装着、实例行也都在，版本总览必须仍然查得出来、切得回去
+        plugin_exists=plugin_registered,
+        get_instance=instances.get,
+        instances_for_source=instances.for_source,
+        get_host_instance=instances.get_host,
+        running=lambda: registry.running,
+        display_name=lambda instance_id: getattr(
+            registry.plugin_class(instance_id), "plugin_name", None
+        ),
+    )
+    version_binding = PluginVersionBinding(
+        inventory=version_inventory,
+        save_instance=instances.save,
+        save_host_instance=instances.save_host,
+        start=lambda instance_id, version: lifecycle.start(instance_id, version=version),
+        stop=lambda plugin_id: _stop_plugin_for_version_binding(lifecycle, plugin_id),
+        log=environment.logger,
+        refresh_registrations=environment.refresh_registrations,
+        pending_installation=_plugin_package_write_probe(host),
+    )
     log_level = PluginLogLevelControl(
         plugin_exists=plugin_registered,
         get_instance=instances.get,
@@ -450,6 +552,8 @@ def build_plugin_runtime(
         metadata=metadata,
         sync=sync,
         clone=clone,
+        version_inventory=version_inventory,
+        version_binding=version_binding,
         log_level=log_level,
         default_target=default_target,
         projection=projection,

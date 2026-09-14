@@ -62,7 +62,10 @@ class PluginLifecycle:
         *,
         classes: dict[str, Any],
         running: dict[str, Any],
-        load_plugins: Callable[[Optional[str], list[str], Callable[[Any], bool]], list[Any]],
+        load_plugins: Callable[
+            [Optional[str], list[str], Callable[[Any], bool], Optional[str]],
+            list[Any],
+        ],
         loadable_plugins: Callable[[], list[str]],
         plugin_config: Callable[[str], dict],
         auth_checker: Callable[[Any], bool],
@@ -105,6 +108,8 @@ class PluginLifecycle:
     def start(
         self,
         plugin_id: Optional[str] = None,
+        *,
+        version: Optional[str] = None,
     ) -> dict[str, PluginRuntimeStatus]:
         """加载并初始化插件，返回每个目标的明确运行结果。
 
@@ -112,6 +117,11 @@ class PluginLifecycle:
         停止取的却是进入时的运行表快照：两者交叠时，本次加载的实例落在快照之外而
         停止仍会把它从运行表里抹掉，它注册的定时任务、线程和事件订阅却留在原处，
         此后没有任何句柄能再停掉它。
+
+        :param plugin_id: 插件或实例 ID，为空表示加载全部应当装载的目标
+        :param version: 本次显式指定加载的源码版本；只在按单个实例 ID 调用时生效，
+            供版本切换失败后以某个具体版本重试。批量加载时各目标一律按自身绑定解析，
+            一个全局版本号对不同插件没有意义
         """
         with self._lifecycle_lock:
             loadable_plugins = self._loadable_plugins()
@@ -123,7 +133,7 @@ class PluginLifecycle:
                 """判断模块是否具备宿主插件最小生命周期钩子。"""
                 return hasattr(module, "init_plugin") and hasattr(module, "plugin_name")
 
-            plugins = self._load_plugins(plugin_id, loadable_plugins, check_module)
+            plugins = self._load_plugins(plugin_id, loadable_plugins, check_module, version)
             plugins.sort(key=lambda item: getattr(item, "plugin_order", 0))
             for plugin in plugins:
                 current_id = plugin.__name__

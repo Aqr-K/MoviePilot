@@ -14,6 +14,7 @@ from typing import Any
 
 from app.foundation.version import compare_version
 from app.runtime.log import logger
+from app.schemas.plugin import PluginInstance
 
 # 插件源码版本目录名的前缀，用于把版本目录与插件目录下的其它条目区分开
 PLUGIN_VERSION_DIR_PREFIX = "v"
@@ -573,3 +574,25 @@ def resolve_plugin_version_dir(plugin_root: Path, version: str | None = None) ->
         if compare_version(candidate, ">", newest):
             newest = candidate
     return on_disk[newest]
+
+
+def resolve_instance_version_dir(
+    plugin_root: Path,
+    instance: PluginInstance | None,
+) -> Path:
+    """按实例的版本绑定解析它应当读取的源码目录。
+
+    未传入实例、或实例跟随当前版本时按插件当前版本解析；钉住某个版本时按该版本解析。
+    钉住的版本目录已不在磁盘上时回落到当前版本，与加载器对同一失效场景的处置口径
+    一致：绑定是一条可以被版本回收或手工删目录改写的旁路事实，它失效不该让实例的
+    静态资源整个取不到，更不该让资源停在一个版本而代码已经落在另一个版本。
+
+    :param plugin_root: 源插件源码根目录
+    :param instance: 实例描述；为空表示直接按插件当前版本解析
+    :return: 源码目录；没有任何版本目录的存量平铺布局时为插件根目录本身
+    """
+    desired_version = None if instance is None else instance.pinned_version
+    try:
+        return resolve_plugin_version_dir(plugin_root, desired_version)
+    except ValueError:
+        return resolve_plugin_version_dir(plugin_root)

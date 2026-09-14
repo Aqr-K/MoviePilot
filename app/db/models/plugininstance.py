@@ -36,6 +36,12 @@ class PluginInstance(Base):
     淹掉；而且它存的其实是实例 ID，表里没有任何一列说得出它属于哪个插件，想列出
     某个插件的全部实例配置就只能靠字符串前缀去猜。
 
+    ``pinned_version`` 为空表示该实例跟随插件的当前版本，非空表示把它钉在某个已装
+    版本上。绑定用单列而不是「版本号 + 是否跟随」两列：两列要求彼此保持一致（跟随时
+    版本号必须被忽略、钉住时又必须与目标同步落盘），这个隐式不变量一旦失步就会让绑定
+    静默落空；单列让非法状态根本无法表示。它也不从磁盘推导——磁盘上的版本目录只说明
+    「装了哪些版本」，说不出「这个实例要用哪一个」，后者是用户的选择，必须落盘。
+
     ``log_level`` 为空表示该实例跟随全局日志等级；非空且未过期时覆盖全局等级，
     ``log_expires_at`` 为空表示覆盖不过期。过期判定在读取时惰性执行，实现见
     ``app.runtime.log``，库里只存原样设置，不存已折算的结果。
@@ -63,6 +69,7 @@ class PluginInstance(Base):
     plugin_name: Mapped[Optional[str]] = mapped_column(String(255))
     plugin_desc: Mapped[Optional[str]] = mapped_column(String(255))
     plugin_icon: Mapped[Optional[str]] = mapped_column(String(255))
+    pinned_version: Mapped[Optional[str]] = mapped_column(String(64))
     # server_default 与迁移 DDL 保持一致：只写 Python 端 default 时 create_all 建出的
     # 表不带 DEFAULT，与迁移建出的表结构不同，alembic 会一直报出差异
     is_default_target: Mapped[bool] = mapped_column(
@@ -106,13 +113,16 @@ class PluginInstance(Base):
         适用：分身的存在本身就由这一行表达，清空设置不等于删除分身。
 
         启用位必须计入：它是本体的装载判据，一个启用中的本体行清空配置后若被当成
-        空行回收掉，该插件下次启动就再也不会被加载。
+        空行回收掉，该插件下次启动就再也不会被加载。版本绑定同理：钉住的版本号是这一行
+        独有的事实，磁盘上任何地方都推不出来，被当成空行回收掉就等于把用户选定的版本
+        静默改回跟随当前版本。
         """
         return not any(
             (
                 self.config_data is not None,
                 self.is_default_target,
                 self.is_enabled,
+                self.pinned_version,
                 self.log_level,
                 self.log_expires_at,
                 self.plugin_name,
