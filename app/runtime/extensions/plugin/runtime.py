@@ -43,6 +43,7 @@ from app.runtime.extensions.plugin.sync import (
 from app.runtime.extensions.plugin.system import PluginSystemServices
 from app.runtime.extensions.plugin.target import PluginDefaultTargetControl
 from app.runtime.extensions.plugin.tools import PluginToolCatalog
+from app.runtime.extensions.plugin.version import resolve_instance_version_dir
 from app.schemas.plugin import PluginInstance
 from app.schemas.types import SystemConfigKey
 
@@ -382,6 +383,14 @@ def build_plugin_runtime(
         loadable_hosts=lambda: set(instances.enabled_hosts()),
         registry=registry,
         log=environment.logger,
+        # 依赖判据要落到实例真正加载的那份源码上：本体钉在旧版本、分身跟随当前版本
+        # 时两者依赖清单不同，共用一个结论会让其中一边带着对不上的依赖被启动
+        instance_directory=lambda source_plugin_id, instance: (
+            resolve_instance_version_dir(
+                environment.plugins_root / source_plugin_id.lower(), instance
+            )
+        ),
+        host_instance=instances.get_host,
     )
     sync = PluginSyncService(
         frozen=lambda: environment.system().is_frozen(),

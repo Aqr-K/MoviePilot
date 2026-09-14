@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from importlib.metadata import PackageNotFoundError, distribution, distributions
 from pathlib import Path
@@ -43,6 +43,11 @@ class _DependencyInstallRequest:
     wheels_dirs: list[Path]
 
 
+# 按插件 ID 给出它本次实际要被扫描的源码目录集合。版本目录布局与实例的版本绑定都属于
+# 运行时扩展包，适配器层不得引用，只能由组合根解析好之后注入
+PluginDependencyDirectoriesProvider = Callable[[str], Iterable[Path]]
+
+
 class PluginDependencyPackagePort(Protocol):
     """声明依赖聚合器所需的唯一 Python 包安装边界。"""
 
@@ -70,14 +75,27 @@ class PluginDependencyInstaller:
         *,
         installed_plugins_provider: Optional[Callable[[], list[str]]] = None,
         plugin_dir: Optional[Path] = None,
+        plugin_directories_provider: Optional[
+            PluginDependencyDirectoriesProvider
+        ] = None,
     ) -> None:
-        """保存包安装端口和启动层提供的已安装插件读取器。"""
+        """保存包安装端口、已安装插件读取器和生效源码目录读取器。
+
+        依赖清单与 wheels 随源码一起进了版本目录，不能再假定它们都躺在
+        ``app/plugins/<插件ID>`` 这一层：钉在旧版本的实例真正加载的是旧版本目录里的
+        代码，按插件根目录或当前版本取清单，装上的依赖与跑着的代码就对不上。
+        ``plugin_directories_provider`` 由组合根按实例绑定解析后注入；未注入时退回
+        自行发现，见 :meth:`_discover_plugin_directories`。
+        """
         if packages is None:
             packages = PluginRuntimeHealth()
         self._packages = packages
         self._installed_plugins_provider = installed_plugins_provider or (lambda: [])
         self._plugin_dir = plugin_dir or (
             Path(get_runtime_setting('ROOT_PATH')) / "app" / "plugins"
+        )
+        self._plugin_directories_provider = (
+            plugin_directories_provider or self._discover_plugin_directories
         )
 
     @staticmethod
@@ -273,27 +291,73 @@ class PluginDependencyInstaller:
             merged.append(Requirement(target))
         return merged
 
-    def _plugin_manifests(self) -> list[Any]:
-        """返回已安装插件当前生效的依赖清单。"""
-        manifests = []
-        installed_plugins = {
-            plugin_id.lower()
-            for plugin_id in self._installed_plugins_provider() or []
-        }
-        try:
-            plugin_dirs = list(self._plugin_dir.iterdir())
-        except (FileNotFoundError, OSError):
+    def _discover_plugin_directories(self, plugin_id: str) -> list[Path]:
+        """未注入解析端口时自行发现一个插件承载依赖清单的源码目录。
+
+        判据是「这里有没有一份可加载的源码」，而不是目录名像不像版本号：版本目录的
+        命名规则属于版本目录布局的所有者，在适配器里再抄一份迟早与它分叉，而分叉的
+        后果是依赖静默漏装。插件根目录自带 ``__init__.py`` 即存量平铺布局，只扫根
+        目录，与本层引入前逐字一致，插件自带的子包也不会被误当成另一份载荷；根目录
+        没有主模块时才向下一层找带主模块的目录，即版本化布局的各个版本目录。
+
+        兜底路径不知道谁绑定了哪一版，因此把全部已装版本一并交出：多扫一个版本最多
+        多装几个用不上的包，漏扫一个版本则是那个实例直接起不来。
+
+        :param plugin_id: 插件ID
+        :return: 源码目录列表；插件根目录不存在时为空
+        """
+        plugin_root = self._plugin_dir / plugin_id.lower()
+        if not plugin_root.is_dir():
             return []
-        for plugin_dir in sorted(plugin_dirs, key=lambda item: item.name):
-            if not plugin_dir.is_dir():
+        if (plugin_root / "__init__.py").is_file():
+            return [plugin_root]
+        try:
+            entries = sorted(plugin_root.iterdir())
+        except OSError:
+            return [plugin_root]
+        version_dirs = [
+            entry
+            for entry in entries
+            if entry.is_dir() and (entry / "__init__.py").is_file()
+        ]
+        return version_dirs or [plugin_root]
+
+    def _plugin_directories(self, plugin_id: str) -> list[Path]:
+        """读取并规范化一个插件本次实际要扫描的源码目录。"""
+        try:
+            candidates = self._plugin_directories_provider(plugin_id)
+        except OSError:
+            return []
+        directories: list[Path] = []
+        seen: set[Path] = set()
+        for candidate in candidates or ():
+            path = Path(candidate)
+            if not path.is_dir():
                 continue
-            if plugin_dir.name not in installed_plugins:
-                logger.debug(f"忽略插件 {plugin_dir.name} 的依赖")
+            resolved = path.resolve()
+            if resolved in seen:
                 continue
-            manifest = load_dependency_manifest(plugin_dir)
-            if manifest is None:
+            seen.add(resolved)
+            directories.append(path)
+        return directories
+
+    def _plugin_manifests(self) -> list[Any]:
+        """返回已安装插件实际生效的源码目录中的依赖清单。"""
+        manifests = []
+        installed_plugins = sorted(
+            self._installed_plugins_provider() or [],
+            key=lambda plugin_id: plugin_id.lower(),
+        )
+        for plugin_id in installed_plugins:
+            plugin_dirs = self._plugin_directories(plugin_id)
+            if not plugin_dirs:
+                logger.debug(f"忽略插件 {plugin_id} 的依赖：没有可用的源码目录")
                 continue
-            manifests.append(manifest)
+            for plugin_dir in plugin_dirs:
+                manifest = load_dependency_manifest(plugin_dir)
+                if manifest is None:
+                    continue
+                manifests.append(manifest)
         return manifests
 
     def _plugin_dependencies(self) -> list[Requirement]:
@@ -330,16 +394,15 @@ class PluginDependencyInstaller:
         installed_packages = self._installed_packages()
 
         for plugin_id in self._installed_plugins_provider() or []:
-            plugin_dir = self._plugin_dir / plugin_id.lower()
-            if not plugin_dir.is_dir():
+            plugin_dirs = self._plugin_directories(plugin_id)
+            if not plugin_dirs:
                 missing_source.append(plugin_id)
                 continue
             try:
-                manifest = load_dependency_manifest(plugin_dir)
-                requirements = [] if manifest is None else [
+                requirements = [
                     requirement
-                    for requirement in manifest.dependencies
-                    if not requirement.marker or requirement.marker.evaluate()
+                    for plugin_dir in plugin_dirs
+                    for requirement in self._directory_requirements(plugin_dir)
                 ]
             except PluginDependencyManifestError as error:
                 logger.error(f"插件 {plugin_id} 依赖清单无效：{error}")
@@ -355,17 +418,74 @@ class PluginDependencyInstaller:
 
         return ready, missing_dependencies, missing_source
 
+    def installed_packages_snapshot(self) -> dict[str, Version]:
+        """给出一份已安装包快照，供同一轮逐目录分类复用。
+
+        读一次要遍历整个环境的发行版元数据，开销接近百毫秒级；逐个实例各读一次会
+        让一次启动分类多花好几秒，而同一轮分类里 Python 环境本来就不会变。
+        """
+        return self._installed_packages()
+
+    def classify_plugin_directory(
+        self,
+        plugin_directory: Path,
+        *,
+        installed_packages: Optional[dict[str, Version]] = None,
+    ) -> tuple[bool, bool]:
+        """按一个确定的源码目录返回 ``(源码存在, 依赖就绪)``。
+
+        :meth:`classify_plugins` 只能给出「这个插件的全部生效版本合起来怎么样」，
+        而钉在不同版本的实例各自加载的是不同的源码，合并结论会把「旧版本本体就绪」
+        与「新版本分身缺依赖」压成同一个状态，随后被逐个 ``start()`` 的实例因此拿到
+        别人的结论。这个窄端口只消费调用方已经解析好的目录，不读实例表也不碰版本
+        布局，把「谁用哪个目录」留在运行时层回答。
+
+        :param plugin_directory: 已解析出的源码目录
+        :param installed_packages: 已安装包快照，供批量分类复用，缺省时现场读取
+        :return: 源码目录是否存在，以及该目录声明的依赖是否全部满足
+        """
+        if not plugin_directory.is_dir():
+            return False, False
+        try:
+            requirements = self._directory_requirements(plugin_directory)
+        except PluginDependencyManifestError as error:
+            logger.error(f"插件依赖清单无效：{plugin_directory} - {error}")
+            return True, False
+        installed = (
+            self._installed_packages()
+            if installed_packages is None
+            else installed_packages
+        )
+        return True, all(
+            self._requirement_satisfied(requirement, installed)
+            for requirement in requirements
+        )
+
+    @staticmethod
+    def _directory_requirements(plugin_dir: Path) -> list[Requirement]:
+        """读取一个源码目录中当前环境真正生效的依赖项。"""
+        manifest = load_dependency_manifest(plugin_dir)
+        if manifest is None:
+            return []
+        return [
+            requirement
+            for requirement in manifest.dependencies
+            if not requirement.marker or requirement.marker.evaluate()
+        ]
+
     def _wheels_dirs(self) -> list[Path]:
-        """收集已安装插件附带的本地 wheels 目录。"""
+        """收集实际生效的源码目录里附带的本地 wheels 目录。
+
+        按安装清单顺序遍历而不是先收进集合：这个列表会原样变成 ``--find-links``
+        参数，集合的迭代序每个进程都不一样，同一台机器两次安装打出的命令行与日志
+        因此对不上，失败复现只能靠猜。去重仍由 ``dict.fromkeys`` 承担。
+        """
         result = []
-        installed_plugins = {
-            plugin_id.lower()
-            for plugin_id in self._installed_plugins_provider() or []
-        }
-        for plugin_id in installed_plugins:
-            wheels_dir = self._plugin_dir / plugin_id / "wheels"
-            if wheels_dir.is_dir():
-                result.append(wheels_dir)
+        for plugin_id in self._installed_plugins_provider() or []:
+            for plugin_dir in self._plugin_directories(plugin_id):
+                wheels_dir = plugin_dir / "wheels"
+                if wheels_dir.is_dir():
+                    result.append(wheels_dir)
         return list(dict.fromkeys(result))
 
     def _prepare_install_request(

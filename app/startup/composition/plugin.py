@@ -26,8 +26,10 @@ from app.runtime.extensions.plugin.version import (
     read_declared_plugin_version,
     register_plugin_version,
     remove_plugin_installed_version,
+    resolve_instance_version_dir,
     resolve_plugin_version_dir,
 )
+from app.runtime.log import logger
 from app.runtime.settings import get_runtime_setting
 from app.schemas.plugin import PluginInstance
 
@@ -219,6 +221,61 @@ def _reject_incompatible_plugin_version_switch(
     )
 
 
+def _bound_plugin_directories(plugin_id: str, plugin_root: Path) -> list[Path]:
+    """解析一个插件名下全部实例实际会加载的版本目录，供依赖扫描使用。
+
+    依赖清单与 wheels 随源码进了版本目录，按插件根目录或一律按当前版本取清单，
+    钉在旧版本的实例装上的依赖就与它实际跑的代码对不上。这里把本体与每个分身的
+    绑定各解析一次，得到「这个插件本次真正要被加载的那几份源码」。
+
+    绑定事实只存在于运行时的实例表里，依赖扫描却早于插件 Runtime 物化就可能被调到，
+    因此用无副作用的 existing-manager 探测，不为一次依赖扫描隐式构造运行时；探测不到
+    或绑定查询失败时回落到磁盘上全部已装版本目录。回落方向刻意偏向多扫：多扫一个
+    版本最多多装几个用不上的包，漏扫一个版本则是那个实例直接起不来。出于同样的理由
+    分身不按启用位过滤——停用的分身随时可能被重新启用，它那一版的依赖先装着不亏。
+
+    版本目录布局属于运行时扩展包，适配器层不得引用，因此这个组合只能落在组合根。
+
+    :param plugin_id: 插件ID
+    :param plugin_root: 插件源码根目录（``app/plugins/<插件ID>``）
+    :return: 去重后的源码目录列表；没有任何版本目录的存量平铺布局时为插件根目录本身
+    """
+    try:
+        # 延迟到调用时导入：本模块在 lifespan 里构造插件市场依赖，那一刻插件 Runtime
+        # 的应用层提供器尚未发布，顶层导入等于让市场组合依赖一个还不存在的门面
+        from app.application.plugin.runtime import get_existing_plugin_manager
+
+        manager = get_existing_plugin_manager()
+    except (ImportError, RuntimeError):
+        manager = None
+
+    bindings: list[Optional[PluginInstance]] = []
+    if manager is not None:
+        try:
+            host = manager.get_plugin_version_binding(plugin_id)
+            bindings.append(host if host is not None and host.is_host else None)
+            bindings.extend(manager.get_plugin_source_instances(plugin_id) or [])
+        except Exception as error:  # noqa: BLE001 - 读不到绑定就退回全量扫描
+            logger.debug(f"读取插件 {plugin_id} 的版本绑定失败，按全部已装版本扫描依赖：{error}")
+            bindings = []
+    if not bindings:
+        on_disk = list(plugin_version_dirs(plugin_root).values())
+        return on_disk or ([plugin_root] if plugin_root.is_dir() else [])
+
+    directories: list[Path] = []
+    seen: set[Path] = set()
+    for binding in bindings:
+        directory = resolve_instance_version_dir(plugin_root, binding)
+        if not directory.is_dir():
+            continue
+        resolved = directory.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        directories.append(directory)
+    return sorted(directories, key=lambda item: item.name)
+
+
 @dataclass(frozen=True, slots=True)
 class PluginMarketComposition:
     """保存插件市场相关 Transport、Client、Package 和 Dependency owner。"""
@@ -259,6 +316,9 @@ def compose_plugin_market(
             health,
             installed_plugins_provider=installed_plugins_provider,
             plugin_dir=plugin_root,
+            plugin_directories_provider=lambda plugin_id: _bound_plugin_directories(
+                plugin_id, plugin_root / plugin_id.lower()
+            ),
         ),
         health=health,
     )
