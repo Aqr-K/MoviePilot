@@ -204,7 +204,8 @@ def _patch_sync_remote_install(helper, monkeypatch, meta: dict,
     monkeypatch.setattr(helper, "_PluginPackageManager__get_plugin_meta", lambda *_args: meta)
     monkeypatch.setattr(helper, "_PluginPackageManager__backup_plugin", lambda _pid: None)
     monkeypatch.setattr(helper, "_PluginPackageManager__remove_old_plugin", lambda _pid: calls.append("remove"))
-    monkeypatch.setattr(helper, "_PluginPackageManager__install_dependencies_if_required", lambda _pid: (False, True, ""))
+    monkeypatch.setattr(helper, "_PluginPackageManager__install_dependencies_if_required",
+                        lambda _pid, _content_dir, *_rest: (False, True, ""))
     # 内容准备被替身接管、不会真的产出暂存内容，换入同样替身化，避免测试写入真实运行目录
     monkeypatch.setattr(
         helper,
@@ -243,7 +244,7 @@ def _patch_async_remote_install(helper, monkeypatch, meta: dict,
     async def fake_remove(_pid):
         calls.append("remove")
 
-    async def fake_dependencies(_pid):
+    async def fake_dependencies(_pid, _content_dir, *_rest):
         return False, True, ""
 
     async def fake_release(_pid, _user_repo, _release_tag, _dest_root=None):
@@ -258,8 +259,12 @@ def _patch_async_remote_install(helper, monkeypatch, meta: dict,
         """内容准备被替身接管，换入同样替身化，避免测试写入真实运行目录。"""
 
     async def fake_to_thread(func, *args, **kwargs):
-        calls.append(("to_thread", func, args, kwargs))
-        return None
+        """替身线程池直接同步执行，保持被投递函数的返回值仍可被落位流程消费。
+
+        不记录调用：这里投递的都是落位内部的机械步骤，记进 calls 会污染
+        「走了 release 还是文件列表」这一唯一观察点。
+        """
+        return func(*args, **kwargs)
 
     monkeypatch.setattr(helper, "async_get_plugin_package_version", fake_package_version)
     monkeypatch.setattr(helper, "_PluginPackageManager__async_get_plugin_meta", fake_meta)
@@ -2518,7 +2523,8 @@ demo = { index = "private" }
         monkeypatch.setattr(helper, "_PluginPackageManager__get_plugin_meta", lambda *_args: {"release": False, "version": "1.2.3"})
         monkeypatch.setattr(helper, "_PluginPackageManager__backup_plugin", lambda _pid: None)
         monkeypatch.setattr(helper, "_PluginPackageManager__remove_old_plugin", lambda _pid: None)
-        monkeypatch.setattr(helper, "_PluginPackageManager__install_dependencies_if_required", lambda _pid: (False, True, ""))
+        monkeypatch.setattr(helper, "_PluginPackageManager__install_dependencies_if_required",
+                        lambda _pid, _content_dir, *_rest: (False, True, ""))
         monkeypatch.setattr(helper, "_PluginPackageManager__prepare_content_via_filelist_sync", lambda *_args: (True, ""))
         monkeypatch.setattr(
             helper,
@@ -3155,7 +3161,7 @@ demo = { index = "private" }
         monkeypatch.setattr(
             helper,
             "_PluginPackageManager__install_dependencies_if_required",
-            lambda _pid: (True, False, "dependency failed"),
+            lambda _pid, _content_dir, *_rest: (True, False, "dependency failed"),
         )
 
         success, message = helper._PluginPackageManager__install_flow_sync(
@@ -3222,7 +3228,9 @@ demo = { index = "private" }
             lambda path: seen.append(path) or (True, ""),
         )
 
-        result = helper._PluginPackageManager__install_dependencies_if_required("DemoPlugin")
+        result = helper._PluginPackageManager__install_dependencies_if_required(
+            "DemoPlugin", plugin_dir
+        )
 
         assert result == (True, True, "")
         assert seen == [pyproject_file]
@@ -3257,7 +3265,9 @@ demo = { index = "private" }
         )
 
         result = asyncio.run(
-            helper._PluginPackageManager__async_install_dependencies_if_required("DemoPlugin")
+            helper._PluginPackageManager__async_install_dependencies_if_required(
+                "DemoPlugin", plugin_dir
+            )
         )
 
         assert result == (True, True, "")
@@ -3536,7 +3546,7 @@ demo = { index = "private" }
         async def swap(_staging_dir, _final_dir):
             calls.append("swap")
 
-        async def dependencies(_pid):
+        async def dependencies(_pid, _content_dir, *_rest):
             return True, False, "dependency failed"
 
         monkeypatch.setattr(helper, "_PluginPackageManager__async_backup_plugin", backup)

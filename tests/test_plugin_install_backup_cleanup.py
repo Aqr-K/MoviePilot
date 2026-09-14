@@ -41,7 +41,7 @@ async def test_successful_install_flows_remove_transient_backups(
     monkeypatch.setattr(
         package,
         "_PluginPackageManager__install_dependencies_if_required",
-        lambda _pid: (False, False, "不存在依赖"),
+        lambda _pid, _content_dir, *_rest: (False, False, "不存在依赖"),
     )
     monkeypatch.setattr(
         package,
@@ -62,7 +62,9 @@ async def test_successful_install_flows_remove_transient_backups(
     async def remove_plugin(_pid: str) -> None:
         """隔离测试中的真实插件目录删除。"""
 
-    async def install_dependencies(_pid: str) -> tuple[bool, bool, str]:
+    async def install_dependencies(
+        _pid: str, _content_dir, *_rest
+    ) -> tuple[bool, bool, str]:
         """表示测试插件没有额外依赖。"""
         return False, False, "不存在依赖"
 
