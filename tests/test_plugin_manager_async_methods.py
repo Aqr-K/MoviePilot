@@ -8,7 +8,7 @@ import pytest
 
 from app.foundation.singleton import Singleton
 from app.schemas.plugin import PluginInstance
-from app.sdk.plugins import PluginManager
+from app.sdk.plugin import PluginManager
 
 
 @pytest.fixture

@@ -38,10 +38,10 @@ class SystemConfigOper(DbOper, metaclass=Singleton):
         plugin_id = key[len(cls.PLUGIN_CONFIG_KEY_PREFIX):]
         return plugin_id or None
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化空快照，数据库加载由启动组合根显式执行。"""
         super().__init__()
-        self.__SYSTEMCONF = {}
+        self.__SYSTEMCONF: dict[str, Any] = {}
         self._snapshot_lock = threading.RLock()
         self._write_lock = threading.RLock()
         self._loaded = False
