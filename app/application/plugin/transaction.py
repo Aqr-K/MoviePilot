@@ -258,6 +258,22 @@ class PluginPersistenceService:
         """列出全部待恢复或待清理的安装 journal。"""
         return await self.__executor.run(self.__installations.list)
 
+    def has_pending_installation(self, plugin_id: str) -> bool:
+        """在阻塞 worker 上同步判断某插件是否仍有未收尾的安装 journal。
+
+        版本回收与版本切换都跑在生命周期线程池里，既不能在事件循环上同步等待异步的
+        ``list_installations``，也不能让后台 worker 反过来去取事件循环。因此这里绕开
+        异步 executor 直接复用同步 store：它自带短生命周期 Session，本来就是线程安全的
+        阻塞调用。调用方必须已经处于阻塞 worker 上。
+
+        journal 只回答「数据库侧的安装事务收没收尾」，磁盘侧那段包写入与文件事件收敛
+        窗口由宿主的监控抑制窗口回答，两者是回收安全判据的两半，缺一不可。
+
+        :param plugin_id: 物理插件ID，大小写不敏感
+        :return: 该插件仍有未收尾安装事务时为 True
+        """
+        return bool(self.__installations.list(plugin_id=plugin_id))
+
     async def get_installation(
         self,
         transaction_id: str,

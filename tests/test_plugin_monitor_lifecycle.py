@@ -21,6 +21,7 @@ from app.runtime.extensions.plugin.admission import PluginMutationAdmission
 from app.runtime.extensions.plugin.system import reset_plugin_system
 from app.runtime.extensions.plugin import manager as plugin_manager_module
 from app.runtime.extensions.plugin.manager import PluginManager
+from app.schemas.exception import PluginMutationRejectedError
 from app.schemas.plugin import PluginRuntimeStatus
 from app.startup.initializers import plugins as plugins_initializer
 
@@ -1100,3 +1101,215 @@ def test_remove_plugin_clears_registry_after_legacy_stop() -> None:
 
     manager._plugin_lifecycle.stop.assert_called_once_with("DemoPlugin")
     manager._plugin_registry.remove.assert_called_once_with("DemoPlugin")
+
+
+def _package_write_manager(monkeypatch) -> PluginManager:
+    """构造一个可直接验证包写入锁行为的插件管理器。"""
+    _reset_plugin_manager()
+    reset_plugin_system()
+    _patch_runtime_settings(
+        monkeypatch,
+        DEV=False,
+        PLUGIN_AUTO_RELOAD=False,
+        ROOT_PATH=MagicMock(),
+    )
+    return PluginManager()
+
+
+def _hold_in_another_thread(acquire, release):
+    """在另一个线程里持有一把锁，返回用于结束持有的收尾函数。
+
+    包写入锁与 quiesce 锁都按线程识别 owner，同线程取用会重入或被自身持有掩盖，
+    必须真的换一个线程才能测出「争用时立即拒绝」。
+    """
+    held = threading.Event()
+    finish = threading.Event()
+
+    def _worker() -> None:
+        """取得锁后挂起，直到用例允许释放。"""
+        acquire()
+        held.set()
+        finish.wait(5)
+        release()
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()
+    assert held.wait(5)
+
+    def _stop() -> None:
+        """释放锁并等待持有线程收尾。"""
+        finish.set()
+        thread.join(5)
+
+    return _stop
+
+
+def test_package_write_guard_rejects_a_competing_package_write(monkeypatch) -> None:
+    """另一个事务持有包写入锁时，本次包写入立即被拒绝而不是排队等待。"""
+    manager = _package_write_manager(monkeypatch)
+    stop = _hold_in_another_thread(
+        lambda: manager._plugin_package_write_lock.acquire(),
+        manager._plugin_package_write_lock.release,
+    )
+    try:
+        with pytest.raises(PluginMutationRejectedError, match="另一个事务写入"):
+            with manager.suppress_plugin_monitor("DemoPlugin"):
+                pass
+    finally:
+        stop()
+        _reset_plugin_manager()
+
+
+def test_package_write_guard_rejects_an_active_version_switch(monkeypatch) -> None:
+    """切版持有 quiesce 锁时包写入立即拒绝：阻塞等待会与切版的路由刷新互锁。"""
+    manager = _package_write_manager(monkeypatch)
+    stop = _hold_in_another_thread(
+        lambda: manager._plugin_quiesce_lock.acquire(),
+        manager._plugin_quiesce_lock.release,
+    )
+    try:
+        with pytest.raises(PluginMutationRejectedError, match="正在切换版本"):
+            with manager.suppress_plugin_monitor("DemoPlugin"):
+                pass
+        # 拒绝之后包写入锁必须仍是空闲的，否则一次被拒的包写入会永久占住它
+        assert manager._plugin_package_write_lock.acquire(blocking=False) is True
+        manager._plugin_package_write_lock.release()
+    finally:
+        stop()
+        _reset_plugin_manager()
+
+
+def test_package_write_guard_releases_both_locks_on_exit(monkeypatch) -> None:
+    """包写入窗口正常收尾后包写入锁与 quiesce 锁都回到空闲，不泄漏持有。"""
+    manager = _package_write_manager(monkeypatch)
+    try:
+        with manager.suppress_plugin_monitor("DemoPlugin"):
+            assert manager._plugin_package_write_lock.acquire(blocking=False) is False
+        assert manager._plugin_package_write_lock.acquire(blocking=False) is True
+        manager._plugin_package_write_lock.release()
+        assert manager._plugin_quiesce_lock.acquire(blocking=False) is True
+        manager._plugin_quiesce_lock.release()
+    finally:
+        _reset_plugin_manager()
+
+
+def test_version_switch_is_refused_during_a_package_write(monkeypatch) -> None:
+    """包写入在途时版本切换被拒绝，绑定服务根本不会被调用。"""
+    manager = _package_write_manager(monkeypatch)
+    switch = MagicMock()
+    manager._plugin_version_binding = SimpleNamespace(set_instance_version=switch)
+    stop = _hold_in_another_thread(
+        lambda: manager._plugin_package_write_lock.acquire(),
+        manager._plugin_package_write_lock.release,
+    )
+    try:
+        success, message = manager.set_plugin_instance_version("DemoPluginWork")
+
+        assert success is False
+        assert "插件包正在被另一个事务写入" in message
+        switch.assert_not_called()
+    finally:
+        stop()
+        _reset_plugin_manager()
+
+
+def test_version_recycle_is_refused_during_a_package_write(monkeypatch) -> None:
+    """包写入在途时版本回收被拒绝，一个版本目录都不会被删除。"""
+    manager = _package_write_manager(monkeypatch)
+    recycle = MagicMock()
+    manager._plugin_version_binding = SimpleNamespace(recycle_versions=recycle)
+    stop = _hold_in_another_thread(
+        lambda: manager._plugin_package_write_lock.acquire(),
+        manager._plugin_package_write_lock.release,
+    )
+    try:
+        with pytest.raises(PluginMutationRejectedError, match="另一个事务写入"):
+            manager.recycle_plugin_versions("DemoPlugin")
+        recycle.assert_not_called()
+    finally:
+        stop()
+        _reset_plugin_manager()
+
+
+def test_version_recycle_is_refused_while_an_instance_is_starting(monkeypatch) -> None:
+    """有启停或切版持有 quiesce 锁时回收被拒绝，而不是排队等到它结束。"""
+    manager = _package_write_manager(monkeypatch)
+    recycle = MagicMock()
+    manager._plugin_version_binding = SimpleNamespace(recycle_versions=recycle)
+    stop = _hold_in_another_thread(
+        lambda: manager._plugin_quiesce_lock.acquire(),
+        manager._plugin_quiesce_lock.release,
+    )
+    try:
+        with pytest.raises(PluginMutationRejectedError, match="正在启停或切换版本"):
+            manager.recycle_plugin_versions("DemoPlugin")
+        recycle.assert_not_called()
+        assert manager._plugin_package_write_lock.acquire(blocking=False) is True
+        manager._plugin_package_write_lock.release()
+    finally:
+        stop()
+        _reset_plugin_manager()
+
+
+def test_recycle_all_skips_clones_and_survives_per_plugin_failure(monkeypatch) -> None:
+    """逐插件回收跳过分身实例，单个插件失败只记日志、不阻断其余插件。"""
+    manager = _package_write_manager(monkeypatch)
+
+    def _recycle(plugin_id: str) -> dict:
+        """第一个插件回收失败，第二个成功。"""
+        if plugin_id == "BrokenPlugin":
+            raise RuntimeError("无法确认安装状态")
+        return {"removed": ["1.0.0"], "kept": {}}
+
+    manager._plugin_version_binding = SimpleNamespace(recycle_versions=_recycle)
+    manager.get_plugin_ids = lambda: ["BrokenPlugin", "DemoPlugin", "DemoPluginWork"]
+    manager.get_plugin_instance = lambda plugin_id: (
+        object() if plugin_id == "DemoPluginWork" else None
+    )
+    try:
+        results = manager.recycle_all_plugin_versions()
+
+        assert results == {"DemoPlugin": {"removed": ["1.0.0"], "kept": {}}}
+    finally:
+        _reset_plugin_manager()
+
+
+def test_recycle_settles_the_monitor_only_after_deleting_something(monkeypatch) -> None:
+    """回收删过目录才延后文件监控收敛期，没删东西时不平白抑制一次重载。"""
+    now = [100.0]
+    monkeypatch.setattr(plugin_manager_module.time, "monotonic", lambda: now[0])
+    manager = _package_write_manager(monkeypatch)
+    outcomes = [{"removed": [], "kept": {}}, {"removed": ["1.0.0"], "kept": {}}]
+    manager._plugin_version_binding = SimpleNamespace(
+        recycle_versions=lambda _plugin_id: outcomes.pop(0)
+    )
+    try:
+        manager.recycle_plugin_versions("DemoPlugin")
+        assert manager.is_plugin_monitor_suppressed("DemoPlugin") is False
+
+        manager.recycle_plugin_versions("DemoPlugin")
+        assert manager.is_plugin_monitor_suppressed("demoplugin") is True
+
+        now[0] += manager.MONITOR_SETTLE_SECONDS
+        assert manager.is_plugin_monitor_suppressed("DemoPlugin") is False
+    finally:
+        _reset_plugin_manager()
+
+
+def test_recycle_is_not_blocked_by_its_own_monitor_settle_window(monkeypatch) -> None:
+    """回收不得先登记抑制计数：那会让它把自己判成安装在途，从此一次都删不掉。"""
+    manager = _package_write_manager(monkeypatch)
+    observed: list[bool] = []
+
+    def _recycle(plugin_id: str) -> dict:
+        """在回收执行期间观察「安装在途」判据的磁盘侧取值。"""
+        observed.append(manager.is_plugin_monitor_suppressed(plugin_id))
+        return {"removed": ["1.0.0"], "kept": {}}
+
+    manager._plugin_version_binding = SimpleNamespace(recycle_versions=_recycle)
+    try:
+        manager.recycle_plugin_versions("DemoPlugin")
+
+        assert observed == [False]
+    finally:
+        _reset_plugin_manager()

@@ -11201,6 +11201,38 @@
     },
     {
       "additionalProperties": false,
+      "description": "Delete one plugin's installed source version directories that no instance references and that fall outside the recent-version retention window; returns what was removed and why everything else was kept. Method: POST. Path: /api/v1/plugin/versions/{plugin_id}/recycle. Effect: destructive_write.",
+      "properties": {
+        "operation_id": {
+          "const": "plugin.version.recycle",
+          "description": "Exact allowlisted MoviePilot operation ID selecting this oneOf branch.",
+          "type": "string"
+        },
+        "path_params": {
+          "additionalProperties": false,
+          "description": "Resource identity placeholders for plugin.version.recycle. Delete one plugin's installed source version directories that no instance references and that fall outside the recent-version retention window; returns what was removed and why everything else was kept. Use only the named fields below.",
+          "properties": {
+            "plugin_id": {
+              "description": "Exact installed or marketplace plugin ID.",
+              "title": "Plugin Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "plugin_id"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "operation_id",
+        "path_params"
+      ],
+      "title": "plugin.version.recycle",
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
       "description": "Pin one plugin instance to an installed version, or clear the pin so it follows the plugin's current version; either way the instance is stopped and started again. Method: PUT. Path: /api/v1/plugin/versions/{plugin_id}/{instance_id}. Effect: reversible_write.",
       "properties": {
         "body": {
@@ -16492,6 +16524,7 @@
         "plugin.statistics",
         "plugin.uninstall",
         "plugin.version.overview",
+        "plugin.version.recycle",
         "plugin.version.set",
         "recommendation.list",
         "scheduler.list",

@@ -576,6 +576,9 @@ API_EXTENDED_OPERATION_SPECS: tuple[ApiOperationSpec, ...] = (
     _write("plugin.instance.set_enabled"),
     _admin_read("plugin.version.overview", sensitivity=ResultSensitivity.PRIVATE),
     _write("plugin.version.set"),
+    # 回收按引用与保留窗口自行判定删哪几个版本目录，调用方事先并不知道会删掉什么，
+    # 与卸载同档：删的都是可重新安装的插件源码，不是用户自己产出的数据
+    _write("plugin.version.recycle", effect=ActionEffect.DESTRUCTIVE_WRITE, recovery=_DELETE_RECOVERABLE),
     # 彻底清理按勾选范围真删用户数据且不可回滚，与重置同档：要确认、且只能人工补救
     _write(
         "plugin.instance.purge",
@@ -854,6 +857,9 @@ API_OPERATION_ROUTES: dict[str, ApiOperationRoute] = {
     ),
     "plugin.version.set": ApiOperationRoute(
         "PUT", "/api/v1/plugin/versions/{plugin_id}/{instance_id}"
+    ),
+    "plugin.version.recycle": ApiOperationRoute(
+        "POST", "/api/v1/plugin/versions/{plugin_id}/recycle"
     ),
     "plugin.instance.purge": ApiOperationRoute(
         "POST", "/api/v1/plugin/instance/{instance_id}/purge"

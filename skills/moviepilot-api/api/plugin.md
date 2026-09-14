@@ -280,6 +280,13 @@ Purpose: List one plugin's installed source versions and, for every instance inc
 - `query`: none
 - `body`: none
 
+### `plugin.version.recycle`
+`POST /api/v1/plugin/versions/{plugin_id}/recycle`; policy effect: `destructive_write`.
+Purpose: Delete one plugin's installed source version directories that no instance references and that fall outside the recent-version retention window; returns what was removed and why everything else was kept.
+- `path_params`: `plugin_id*` (string): Exact installed or marketplace plugin ID.
+- `query`: none
+- `body`: none
+
 ### `plugin.version.set`
 `PUT /api/v1/plugin/versions/{plugin_id}/{instance_id}`; policy effect: `reversible_write`.
 Purpose: Pin one plugin instance to an installed version, or clear the pin so it follows the plugin's current version; either way the instance is stopped and started again.

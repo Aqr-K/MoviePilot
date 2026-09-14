@@ -118,6 +118,16 @@ async def init_extra():
     finally:
         plugin_manager.set_plugin_settling(False)
         plugin_manager.start_monitor()
+        # 版本回收放在插件同步与启动全部收尾之后：此刻各实例已按各自绑定跑起来，
+        # 「谁还引用哪一版」才是实测事实而不是猜测；放在启动前跑会拿一份空的运行表
+        # 去判引用，把正要被加载的版本当成无人引用。整次回收扫描并删除目录，是阻塞
+        # 文件 I/O，必须交给线程池而不是占住事件循环
+        try:
+            await run_in_threadpool_to_completion(
+                plugin_manager.recycle_all_plugin_versions
+            )
+        except Exception as error:  # noqa: BLE001 - 版本回收失败不得阻断启动收尾
+            logger.error(f"插件版本回收时发生错误：{error}", exc_info=True)
         _log_runtime_gil_status()
     # 设置系统已修改标志
     SystemHelper().set_system_modified()

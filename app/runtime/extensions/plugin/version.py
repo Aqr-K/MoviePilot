@@ -1,4 +1,4 @@
-"""插件源码按版本分目录布局的目录名映射、已装版本元信息读写与加载路径解析。"""
+"""插件源码按版本分目录布局的目录名映射、已装版本元信息读写、加载路径解析与版本回收。"""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import re
 import shutil
 import uuid
 from datetime import datetime, timezone
+from functools import cmp_to_key
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,18 @@ PLUGIN_FALLBACK_VERSION = "0.0.0"
 # 合法版本号字符集：数字、字母、点、连字符、加号。语义化版本的先行版与构建
 # 元数据字符集不含下划线，据此保证点与下划线的互换是单射、可逆
 _PLUGIN_VERSION_PATTERN = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]*$")
+# 版本回收默认按登记时间额外保留的最近版本数，含当前版本。取 1 等于不留退路——
+# 装错一个新版本后连「切回上一版」的对象都没有；取 3 以上时磁盘占用继续涨、
+# 而真正会被切回去的只有最近那一版，收益递减。2 是「装错一次仍能一键切回」这一
+# 典型场景的最小值
+PLUGIN_VERSION_RETENTION_WINDOW = 2
+# 版本回收给出的保留理由。理由要能直接呈现给用户回答「为什么这个版本没被清掉」，
+# 因此收敛成常量而不是散落在判定分支里的字面量
+PLUGIN_VERSION_KEPT_CURRENT = "当前安装版本"
+PLUGIN_VERSION_KEPT_REFERENCED = "被实例引用（钉住、跟随或此刻已生效的版本）"
+PLUGIN_VERSION_KEPT_PENDING_INSTALL = "存在未收尾安装事务，跳过本次版本回收"
+PLUGIN_VERSION_KEPT_DELETE_FAILED = "本次删除失败，下次回收重试"
+PLUGIN_VERSION_KEPT_WINDOW = "保留窗口内（按登记时间的最近 {retention} 个版本）"
 
 
 class PluginLayoutMigrationError(RuntimeError):
@@ -41,6 +54,23 @@ class PluginLayoutMigrationError(RuntimeError):
     抛出本异常时插件源码可能已经部分搬进中转目录，插件在下一次迁移续做成功前
     不保证可加载；调用方必须据此放弃本次安装，而不是继续往版本目录写新内容。
     """
+
+
+def compare_plugin_versions(left: str, right: str) -> int:
+    """按语义比较两个插件版本号，供排序键使用。
+
+    版本列表与保留窗口都必须按语义序而不是字典序排，否则 1.10.0 会排在 1.9.0
+    前面，与加载解析当前版本时用的比较口径分叉。
+
+    :param left: 左侧版本号
+    :param right: 右侧版本号
+    :return: 左大于右为 1，右大于左为 -1，语义相等为 0
+    """
+    if compare_version(left, ">", right):
+        return 1
+    if compare_version(right, ">", left):
+        return -1
+    return 0
 
 
 def plugin_version_dir_name(version: str) -> str:
@@ -498,6 +528,158 @@ def remove_plugin_installed_version(
         return
     # 版本目录删不掉，插件目录还留着半份失败载荷；至少让元信息不再声称它是当前版本
     _write_manifest_without_version(plugin_root, version, previous_current)
+
+
+def _plugin_version_recent_window(
+    on_disk: dict[str, Path],
+    entries: dict[str, dict[str, Any]],
+    retention: int,
+) -> set[str]:
+    """按登记时间挑出落在保留窗口内的版本号。
+
+    第二排序键必须是版本号语义序：元信息丢失或损坏时所有登记时间都读成空串，只按
+    它排序会让排序键全部相等，而稳定排序不反转等值元素，窗口会退化成保留目录名
+    字典序最靠前的那几个（也就是最旧的几个），把当前正在加载的最新版本删掉。
+
+    :param on_disk: 磁盘上的版本号到版本目录映射
+    :param entries: 元信息登记的版本号到版本条目映射
+    :param retention: 额外保留的最近版本数，非正数表示不额外保留
+    :return: 落在保留窗口内的版本号集合
+    """
+
+    def rank(version: str) -> tuple[str, Any]:
+        """先按登记时间、再按版本号语义序排序。"""
+        installed_at = (entries.get(version) or {}).get("installed_at") or ""
+        return installed_at, cmp_to_key(compare_plugin_versions)(version)
+
+    return set(sorted(on_disk, key=rank, reverse=True)[: max(retention, 0)])
+
+
+def _plugin_version_keep_reasons(
+    on_disk: dict[str, Path],
+    *,
+    current_version: str | None,
+    referenced_versions: set[str],
+    orphan_versions: set[str],
+    recent_window: set[str],
+    retention: int,
+) -> dict[str, str]:
+    """逐个已装版本判定该不该保留，没有理由的版本即本次回收对象。
+
+    判据按「越硬越先判」排序：当前版本与被实例引用的版本删掉即事故，孤儿目录则连
+    保留窗口都不占——窗口是按登记时间给出的退路，一个元信息根本没登记过的目录谈不上
+    「最近装的第几个」，把它留在窗口里等于让一份失败残留挤掉真正可回退的旧版本。
+
+    :param on_disk: 磁盘上的版本号到版本目录映射
+    :param current_version: 元信息登记的当前版本号
+    :param referenced_versions: 被实例引用的版本号集合
+    :param orphan_versions: 磁盘上存在、元信息却没登记的版本号集合
+    :param recent_window: 落在保留窗口内的版本号集合
+    :param retention: 保留窗口大小，仅用于组装可读理由
+    :return: 版本号到保留理由的映射
+    """
+    kept: dict[str, str] = {}
+    for version in on_disk:
+        if version == current_version:
+            kept[version] = PLUGIN_VERSION_KEPT_CURRENT
+        elif version in referenced_versions:
+            kept[version] = PLUGIN_VERSION_KEPT_REFERENCED
+        elif version in orphan_versions:
+            continue
+        elif version in recent_window:
+            kept[version] = PLUGIN_VERSION_KEPT_WINDOW.format(retention=retention)
+    return kept
+
+
+def recycle_plugin_version_directories(
+    plugin_root: Path,
+    referenced_versions: set[str],
+    retention: int = PLUGIN_VERSION_RETENTION_WINDOW,
+    *,
+    has_pending_installation: bool = False,
+) -> dict[str, Any]:
+    """回收插件源码目录下没有实例引用、也不在保留窗口内的旧版本目录。
+
+    保留判据满足其一即保留，取值一律来自调用方实测的运行态与元信息，本函数不按目录
+    时间戳去猜：该版本是元信息登记的当前版本；该版本落在 ``referenced_versions``
+    里；该版本按登记时间排在最近 ``retention`` 个以内。删除前逐一走
+    ``_delete_plugin_version_dir`` 的三重校验，单个目录删除失败只记日志、不牵连
+    其余目录，最后把确实删掉的版本从元信息中一并摘除。
+
+    ``referenced_versions`` 的完整性由调用方负责，它必须同时并入：每个实例（本体与
+    全部分身，含已停用的分身）按绑定解析出的期望版本——钉住即那一版、没钉版即当前
+    版本；以及每个实例此刻实际加载中的版本。后者不能省：一次刚落盘绑定、尚未重载
+    生效的切换里，期望版本是新的那一版而内存里跑的还是旧的那一版，只记其一必然删掉
+    另一半。安装在途的目标版本不靠这个集合覆盖，而是由 ``has_pending_installation``
+    直接跳过整次回收——在途安装的目标版本目录可能还没落盘，根本无从进入集合。
+
+    孤儿版本目录（磁盘上存在、元信息却没登记）不占保留窗口，只要既不是当前版本也
+    没有实例引用就直接回收：它的唯一来源是一次失败安装回滚时删目录失败——元信息已
+    经摘掉它、磁盘上却留着半份源码，而加载解析在元信息失效时会回落到「磁盘上版本号
+    最高的已装版本」，这份半成品很可能正是最高的那个。元信息一条版本都没登记时不做
+    孤儿判定：那是元信息缺失或损坏，此时人人都「没登记」，按孤儿处理等于清空插件。
+
+    载荷收据刻意不在这里刷新。收据是安装事务在 journal 内产出的提交期证明，用来证明
+    数据库记录与磁盘载荷同源；回收既不在 journal 内、也没有任何新载荷可以证明，从
+    外部改写它等于让一条没有事务背书的路径去断言「两侧仍是同一份载荷」。更硬的理由
+    是容器部署下 COMMITTED 回放要拿身份行的收据与安装期整根持久备份比对，而备份里
+    仍含着本次回收删掉的兄弟版本目录：刷新收据只会省掉一次重装，却把那条恢复路径
+    直接判死。代价是回收确实删过东西之后，该插件下一次安装或刷新会因收据对不上多
+    重装一次同版本——保守方向、有界、且那次重装本身就会重新写出一份诚实的收据。
+    没删掉任何东西时元信息原样不动，收据也就不受影响。
+
+    :param plugin_root: 插件源码根目录（``app/plugins/<插件ID>``）
+    :param referenced_versions: 被实例占用的版本号集合，由调用方基于实测绑定与运行态算出
+    :param retention: 额外按登记时间保留的最近版本数，取值理由见
+        ``PLUGIN_VERSION_RETENTION_WINDOW``
+    :param has_pending_installation: 该插件是否仍有未收尾的安装事务或包写入窗口。为真时
+        整次回收跳过：此刻磁盘内容正在变，删任何一个版本目录都可能删到在途安装依赖的
+        材料，也会改掉 COMMITTED 回放要比对的那份载荷
+    :return: 含 removed（本次已删除的版本号列表）与 kept（版本号到保留理由的映射）的字典
+    """
+    on_disk = plugin_version_dirs(plugin_root)
+    if not on_disk:
+        return {"removed": [], "kept": {}}
+    if has_pending_installation:
+        return {
+            "removed": [],
+            "kept": {version: PLUGIN_VERSION_KEPT_PENDING_INSTALL for version in on_disk},
+        }
+
+    manifest = read_plugin_versions_manifest(plugin_root)
+    raw_current = manifest.get("current")
+    current_version = raw_current if isinstance(raw_current, str) and raw_current else None
+    entries = {
+        entry["version"]: entry
+        for entry in (manifest.get("versions") or [])
+        if isinstance(entry, dict) and isinstance(entry.get("version"), str)
+    }
+    kept = _plugin_version_keep_reasons(
+        on_disk,
+        current_version=current_version,
+        referenced_versions=referenced_versions,
+        orphan_versions=set(on_disk) - set(entries) if entries else set(),
+        recent_window=_plugin_version_recent_window(on_disk, entries, retention),
+        retention=retention,
+    )
+
+    removed: list[str] = []
+    for version in sorted(on_disk):
+        if version in kept:
+            continue
+        if _delete_plugin_version_dir(plugin_root, version, on_disk[version]):
+            removed.append(version)
+        else:
+            kept[version] = PLUGIN_VERSION_KEPT_DELETE_FAILED
+
+    if removed:
+        remaining = [
+            entry
+            for entry in (manifest.get("versions") or [])
+            if isinstance(entry, dict) and entry.get("version") not in removed
+        ]
+        write_plugin_versions_manifest(plugin_root, remaining, current_version)
+    return {"removed": removed, "kept": kept}
 
 
 def read_declared_plugin_version(init_file: Path) -> str | None:

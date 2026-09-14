@@ -1,4 +1,4 @@
-"""插件已装版本查询与实例版本绑定切换接口。"""
+"""插件已装版本查询、实例版本绑定切换与旧版本目录回收接口。"""
 
 from typing import Any
 
@@ -10,6 +10,7 @@ from app.api.response import ResponseAPIRouter
 from app.application.plugin.runtime import get_plugin_manager
 from app.schemas.plugin import PluginInstanceVersionUpdateRequest as _SchemaPluginInstanceVersionUpdateRequest
 from app.schemas.plugin import PluginVersionOverview as _SchemaPluginVersionOverview
+from app.schemas.plugin import PluginVersionRecycleOutcome as _SchemaPluginVersionRecycleOutcome
 from app.schemas.response import Response as _SchemaResponse
 
 router = ResponseAPIRouter()
@@ -74,3 +75,33 @@ def set_plugin_instance_version(
         success=success,
         message="版本切换成功" if success else message,
     )
+
+
+@router.post(  # type: ignore[misc]
+    "/versions/{plugin_id}/recycle",
+    summary="回收插件不再被引用的已装版本目录",
+    response_model=_SchemaResponse[_SchemaPluginVersionRecycleOutcome],
+)
+def recycle_plugin_versions(
+    plugin_id: str,
+    _: ApiPrincipal = Depends(get_current_active_superuser),
+) -> Any:
+    """
+    手动回收指定插件不再被任何实例引用、也不在保留窗口内的已装版本目录
+
+    回收删的是磁盘上的插件源码，不可撤销，因此走 POST 而不是 DELETE：它删的不是
+    ``plugin_id`` 这个资源，而是该资源名下一批由服务端按引用与保留窗口自行判定出来的
+    子目录，调用方事先并不知道会删掉哪几个。
+
+    响应里的 ``removed`` 是本次确实删掉的版本，``kept`` 逐个给出没被删的理由（当前
+    版本、被实例引用、落在保留窗口内、本次删除失败）。整次回收被拒绝时（插件正在安装
+    或写入包文件、有实例正在启停或切换版本、安装事务状态无从确认）不会删除任何目录，
+    可读原因随响应返回，稍后重试即可。
+    """
+    try:
+        outcome = get_plugin_manager().recycle_plugin_versions(plugin_id)
+    # RuntimeError 一支同时覆盖停机封口与锁争用（PluginMutationRejectedError 是它的
+    # 子类）以及安装事务状态无从确认，三者的共同事实都是「什么都没删，可以稍后重试」
+    except (LookupError, RuntimeError) as error:
+        return _SchemaResponse(success=False, message=str(error))
+    return _SchemaResponse(success=True, data=outcome)

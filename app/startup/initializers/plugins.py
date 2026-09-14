@@ -399,6 +399,25 @@ def _prepare_legacy_plugin_import(*, plugin_id: str, plugin_dir: Path) -> None:
         )
 
 
+def _plugin_has_pending_installation(plugin_id: str) -> bool:
+    """在阻塞 worker 上查询某插件是否仍有未收尾的安装事务。
+
+    持久化服务在 lifespan 中途才装配完成，而 Runtime 的依赖图早于它构造，因此不能在
+    组合时绑住服务实例，只能每次调用现取。服务尚未装配时按「没有在途」返回：那说明这套
+    接线里根本还没有安装流程可言（安全模式、裸运行时、单元测试替身），按在途处理会让版本
+    切换与版本回收永远打不开。查询本身失败则原样抛出——那才是真正的未知状态，由调用方
+    失败关闭。
+
+    :param plugin_id: 物理插件ID
+    :return: 该插件仍有未收尾安装事务时为 True
+    """
+    try:
+        persistence = get_plugin_persistence()
+    except RuntimeError:
+        return False
+    return persistence.has_pending_installation(plugin_id)
+
+
 def build_plugin_runtime_graph(host: PluginRuntimeHost) -> PluginRuntime:
     """在启动组合根构造插件 Runtime 的完整依赖图。"""
     return build_plugin_runtime(
@@ -419,6 +438,7 @@ def build_plugin_runtime_graph(host: PluginRuntimeHost) -> PluginRuntime:
             set_default_target=_set_plugin_default_target,
             clear_default_target=_clear_plugin_default_target,
             refresh_registrations=_register_plugin_runtime,
+            pending_installation=_plugin_has_pending_installation,
         ),
         tool_build_max_attempts=PluginManager.AGENT_TOOLS_BUILD_MAX_ATTEMPTS,
     )

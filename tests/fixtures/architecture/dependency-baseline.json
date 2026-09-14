@@ -1077,8 +1077,8 @@
       "runtime_only": true
     }
   },
-  "edge_count": 8721,
-  "edge_sha256": "1d6f0d96a0b7bd10ebe6455a00cf62e574f5f8a42cf4bfa566d55cf7de37a709",
+  "edge_count": 8719,
+  "edge_sha256": "09582d54d287d5bedfd363c0efe3cd29515d48b3383eec58472c8bbf24554493",
   "edges": [
     "app -> app.foundation",
     "app -> app.foundation.environment",
@@ -8277,8 +8277,6 @@
     "app.runtime.extensions.module.manager -> app.schemas.types",
     "app.runtime.extensions.plugin.admission -> app.schemas",
     "app.runtime.extensions.plugin.admission -> app.schemas.exception",
-    "app.runtime.extensions.plugin.binding -> app.foundation",
-    "app.runtime.extensions.plugin.binding -> app.foundation.version",
     "app.runtime.extensions.plugin.binding -> app.runtime",
     "app.runtime.extensions.plugin.binding -> app.runtime.extensions",
     "app.runtime.extensions.plugin.binding -> app.runtime.extensions.plugin",

@@ -117,6 +117,10 @@ class PluginRuntimeEnvironment:
     # 运行时扩展包不得反向 import，因此只能由组合根注入；未注入时静默跳过，供裸运行
     # 时与单元测试构造一个不带宿主注册面的 Runtime
     refresh_registrations: Callable[[str], None] | None = None
+    # 未收尾安装事务的同步查询端口：版本回收与切版都跑在阻塞 worker 上，不能等待
+    # 异步 journal 查询。查询实现属于 Application 层，运行时扩展包不得反向 import，
+    # 因此只能由组合根注入；未注入时只剩磁盘侧的包写入窗口这一半判据
+    pending_installation: Callable[[str], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,26 +173,37 @@ def _stop_plugin_for_version_binding(
     return bool(lifecycle.finalize(plugin_id))
 
 
-def _plugin_package_write_probe(host: PluginRuntimeHost) -> Callable[[str], bool]:
-    """把宿主的包写入抑制窗口适配成「安装是否在途」判据。
+def _plugin_pending_installation_probe(
+    host: PluginRuntimeHost,
+    persisted: Callable[[str], bool] | None,
+) -> Callable[[str], bool]:
+    """把数据库侧的安装 journal 与磁盘侧的包写入窗口合并成一条「安装在途」判据。
 
-    包写入窗口正是插件目录内容会被换入换出的那段时间，此刻切版本可能落到一份写了
-    一半的源码上，因此拒绝切换比接受它更便宜。窗口在文件事件收敛前会多保留几秒，
-    判据因而偏保守——多拒绝几秒钟的切换请求，而不是放进一次撞上安装的切换。
+    两半各自只看得见一侧，必须同时成立才算收敛：journal 说的是数据库事务收没收尾，
+    崩溃后重启仍然查得到；包写入窗口说的是此刻插件目录是不是正在被换入换出，它在
+    文件事件收敛前还会多保留几秒，因而偏保守——多拒绝几秒钟的切版与回收，好过放进
+    一次撞上安装的删除。任一为真即在途。
 
-    宿主没有提供这个能力时（裸运行时、单元测试替身）返回恒假：那种接线根本没有安装
-    流程，按在途处理会让版本切换永远打不开。
+    两侧端口都可能缺席（裸运行时、单元测试替身），缺席按恒假处理：那种接线根本没有
+    安装流程可言，按在途处理会让版本切换与版本回收永远打不开。缺席与「查得到但结果
+    未知」是两回事，后者由调用方失败关闭。
 
-    注意这只是一次读取，不是互斥：探测之后到真正启动之间仍可能开始一次安装。真正的
-    互斥需要包写入锁，那属于版本回收那一层要解决的问题。
+    这条判据是一次读取而不是互斥；真正的互斥由宿主的包写入锁提供，切版、回收与安装
+    三方在那把锁上非阻塞争用，抢不到即拒绝。
 
     :param host: 插件宿主生命周期门面
+    :param persisted: 数据库侧未收尾安装事务查询端口；未装配时为 None
     :return: 按插件 ID 判定安装是否在途的函数
     """
     suppressed = getattr(host, "is_plugin_monitor_suppressed", None)
-    if not callable(suppressed):
-        return lambda _plugin_id: False
-    return lambda plugin_id: bool(suppressed(plugin_id))
+
+    def probe(plugin_id: str) -> bool:
+        """任一侧的安装事实尚未收敛即判定在途。"""
+        if persisted is not None and persisted(plugin_id):
+            return True
+        return bool(callable(suppressed) and suppressed(plugin_id))
+
+    return probe
 
 
 def build_plugin_runtime(
@@ -517,7 +532,9 @@ def build_plugin_runtime(
         stop=lambda plugin_id: _stop_plugin_for_version_binding(lifecycle, plugin_id),
         log=environment.logger,
         refresh_registrations=environment.refresh_registrations,
-        pending_installation=_plugin_package_write_probe(host),
+        pending_installation=_plugin_pending_installation_probe(
+            host, environment.pending_installation
+        ),
     )
     log_level = PluginLogLevelControl(
         plugin_exists=plugin_registered,

@@ -2,7 +2,7 @@
   "disposition_counts": {
     "alternate-auth-duplicate": 11,
     "consolidated": 71,
-    "gateway": 228,
+    "gateway": 229,
     "provider-skill": 12,
     "stream_or_binary": 10,
     "transport_or_identity": 66,
@@ -18,10 +18,10 @@
       "reason": "The executor validates and expands this bounded source placeholder to one of tmdb, douban, bangumi, or anilist before calling the corresponding concrete OpenAPI route."
     }
   ],
-  "gateway_http_route_count": 229,
-  "gateway_operation_count": 231,
-  "matched_gateway_http_route_count": 228,
-  "openapi_operation_count": 411,
+  "gateway_http_route_count": 230,
+  "gateway_operation_count": 232,
+  "matched_gateway_http_route_count": 229,
+  "openapi_operation_count": 412,
   "operations": [
     {
       "disposition": "consolidated",
@@ -2621,6 +2621,20 @@
       "path": "/api/v1/plugin/versions/{plugin_id}",
       "reason": "Executable through moviepilot_api; exact inputs are generated into MCP tools/list and SKILL.md.",
       "summary": "查询插件已装版本与实例版本绑定",
+      "tags": [
+        "plugin"
+      ]
+    },
+    {
+      "disposition": "gateway",
+      "method": "POST",
+      "operation_ids": [
+        "plugin.version.recycle"
+      ],
+      "owner": "moviepilot-api",
+      "path": "/api/v1/plugin/versions/{plugin_id}/recycle",
+      "reason": "Executable through moviepilot_api; exact inputs are generated into MCP tools/list and SKILL.md.",
+      "summary": "回收插件不再被引用的已装版本目录",
       "tags": [
         "plugin"
       ]

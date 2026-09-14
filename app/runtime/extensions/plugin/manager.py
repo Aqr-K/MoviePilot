@@ -5,6 +5,7 @@ import posixpath
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar, Token
 from datetime import datetime
 from pathlib import Path
 from typing import (
@@ -194,6 +195,21 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         self._suppressed_monitor_plugins: Dict[str, int] = {}
         self._monitor_suppressed_until: Dict[str, float] = {}
         self._plugin_quiesce_lock = threading.RLock()
+        # 包写入锁：把安装、版本切换、版本回收这三个会同时改写同一份插件源码的事务
+        # 串起来。它刻意独立于 quiesce 锁——安装跨越异步文件、数据库与重载阶段，用
+        # quiesce 锁会让事件循环持锁等待 reload worker；三方一律非阻塞争用，抢不到
+        # 立即拒绝，因此任何一方都不会在锁上排队。
+        # 也刻意是一把全局锁而不是按插件 ID 分的锁：包写入是低频短事务，跨插件的误争用
+        # 代价只是一次「稍后重试」，而按 ID 分锁要额外维护锁表的生命周期，还挡不住
+        # 安装依赖、共享 wheels 这类跨插件的真实交叉写入
+        self._plugin_package_write_lock = threading.Lock()
+        # 同一执行 owner（线程 + asyncio task）的嵌套包写入事务需要重入，例如一次安装
+        # 内部再次进入包写入 guard。ContextVar 而不是线程局部：安装的 guard 跨越 await，
+        # 会在同一线程上与别的协程交错，按线程记深度会把别人的嵌套算到自己头上
+        self._plugin_package_write_depth: ContextVar[tuple[int, int, int]] = ContextVar(
+            "plugin_package_write_depth",
+            default=(0, -1, -1),
+        )
         self._plugin_quiesce_future: Optional[
             concurrent.futures.Future[bool]
         ] = None
@@ -573,9 +589,38 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
 
     @contextmanager
     def suppress_plugin_monitor(self, plugin_id: str):
-        """在插件包写入及其文件事件收敛期间阻止监控重复重载。"""
+        """在插件包写入及其文件事件收敛期间独占包写入权并阻止监控重复重载。
+
+        进入时按序取得两把许可，任一抢不到即拒绝本次包写入，不阻塞等待：
+
+        先用非阻塞方式探一下 quiesce 锁，判断此刻有没有正在进行的版本切换。切版会
+        在完成后刷新该实例的动态路由，而路由刷新可能同步等待事件循环；这个 guard 的
+        函数体跨越 await、跑在事件循环上，一旦它阻塞等待切版持有的锁，两侧就会互等。
+        因此这里必须立即拒绝，把「稍后重试」交回给安装调用方，绝不能改成阻塞获取。
+        探测成功后立刻释放：guard 体内会 await，把 quiesce 锁持有到 await 边界之外会
+        让安装内部的 reload worker 与事件循环互相等待。
+
+        再非阻塞取包写入锁，抢不到说明另一个包写入事务（另一次安装，或一次版本回收）
+        正在改同一批目录。锁按「线程 + 当前 task」识别 owner，同一事务内的嵌套 guard
+        重入而不自锁。
+
+        :param plugin_id: 待写入的物理插件ID
+        :raise PluginMutationRejectedError: 停机封口、版本切换在途或包写入争用
+        """
         with self.mutation("更新插件包"):
             normalized_id = plugin_id.lower()
+            if not self._plugin_quiesce_lock.acquire(blocking=False):
+                raise PluginMutationRejectedError(
+                    f"更新插件包 {plugin_id}（插件实例正在切换版本）"
+                )
+            try:
+                package_lock_state = self._try_acquire_plugin_package_write()
+            finally:
+                self._plugin_quiesce_lock.release()
+            if package_lock_state is None:
+                raise PluginMutationRejectedError(
+                    f"更新插件包 {plugin_id}（插件包正在被另一个事务写入）"
+                )
             with self._monitor_suppression_lock:
                 self._suppressed_monitor_plugins[normalized_id] = (
                     self._suppressed_monitor_plugins.get(normalized_id, 0) + 1
@@ -583,15 +628,59 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
             try:
                 yield
             finally:
-                with self._monitor_suppression_lock:
-                    count = self._suppressed_monitor_plugins.get(normalized_id, 0)
-                    if count <= 1:
-                        self._suppressed_monitor_plugins.pop(normalized_id, None)
-                        self._monitor_suppressed_until[normalized_id] = (
-                            time.monotonic() + self.MONITOR_SETTLE_SECONDS
-                        )
-                    else:
-                        self._suppressed_monitor_plugins[normalized_id] = count - 1
+                try:
+                    with self._monitor_suppression_lock:
+                        self._finish_monitor_suppression(normalized_id)
+                finally:
+                    self._release_plugin_package_write(package_lock_state)
+
+    def _finish_monitor_suppression(self, normalized_id: str) -> None:
+        """在监控互斥锁内结束一次包写入抑制窗口，最外层退出时留一段事件收敛期。"""
+        count = self._suppressed_monitor_plugins.get(normalized_id, 0)
+        if count <= 1:
+            self._suppressed_monitor_plugins.pop(normalized_id, None)
+            self._monitor_suppressed_until[normalized_id] = (
+                time.monotonic() + self.MONITOR_SETTLE_SECONDS
+            )
+        else:
+            self._suppressed_monitor_plugins[normalized_id] = count - 1
+
+    @staticmethod
+    def _plugin_package_write_owner() -> Tuple[int, int]:
+        """返回当前线程与 asyncio task 组成的包写入事务 owner 身份。"""
+        try:
+            task = asyncio.current_task()
+        except RuntimeError:
+            task = None
+        return threading.get_ident(), id(task) if task is not None else -1
+
+    def _try_acquire_plugin_package_write(
+        self,
+    ) -> Optional[Tuple[Token[Tuple[int, int, int]], bool]]:
+        """非阻塞取得包写入锁，同一执行 owner 的嵌套事务按深度重入。
+
+        :return: 释放所需的深度 Token 与「本层是否真正持有锁」；争用失败时为 None
+        """
+        depth = self._plugin_package_write_depth
+        current_depth, owner_thread, owner_task = depth.get()
+        current_thread, current_task = self._plugin_package_write_owner()
+        if current_depth > 0 and (owner_thread, owner_task) == (current_thread, current_task):
+            return depth.set((current_depth + 1, current_thread, current_task)), False
+        token = depth.set((1, current_thread, current_task))
+        if self._plugin_package_write_lock.acquire(blocking=False):
+            return token, True
+        depth.reset(token)
+        return None
+
+    def _release_plugin_package_write(
+        self,
+        state: Tuple[Token[Tuple[int, int, int]], bool],
+    ) -> None:
+        """恢复嵌套深度，并由真正持有锁的最外层释放包写入锁。"""
+        token, owns_lock = state
+        self._plugin_package_write_depth.reset(token)
+        if owns_lock:
+            self._plugin_package_write_lock.release()
 
     def is_plugin_monitor_suppressed(self, plugin_id: str) -> bool:
         """判断插件是否处于包写入或延迟文件事件收敛阶段。"""
@@ -1386,6 +1475,8 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         设置插件实例的版本绑定，并完成一次停止再启动
         切换全程收在同一个可变事务与 quiesce 锁内：绑定落盘、停旧、起新、失败回退是
         一串必须按序发生的步骤，中途被停机封口切开会留下一个停了却没起来的实例
+        同时非阻塞占住包写入锁，与安装、版本回收互斥：绑定服务里的「安装在途」判据
+        只是一次读取，读完到真正启动之间仍可能开始一次安装，这把锁才是真正的互斥
         :param instance_id: 实例ID，可以是分身实例 ID，也可以是源插件本体自身 ID
         :param pinned_version: 锚定的目标版本号；为空表示改为跟随当前版本
         :return: (是否成功, 成功时为实例ID／失败时为可读原因)
@@ -1393,13 +1484,93 @@ class PluginManager(ConfigReloadMixin, metaclass=Singleton):
         try:
             with self.mutation(f"切换插件实例 {instance_id} 版本"):
                 with self._plugin_quiesce_lock:
-                    return self._plugin_version_binding.set_instance_version(
-                        instance_id,
-                        pinned_version=pinned_version,
-                    )
+                    package_lock_state = self._try_acquire_plugin_package_write()
+                    if package_lock_state is None:
+                        return False, (
+                            f"插件包正在被另一个事务写入，拒绝切换插件实例 {instance_id} 的版本"
+                        )
+                    try:
+                        return self._plugin_version_binding.set_instance_version(
+                            instance_id,
+                            pinned_version=pinned_version,
+                        )
+                    finally:
+                        self._release_plugin_package_write(package_lock_state)
         except PluginMutationRejectedError as error:
             logger.warning(str(error))
             return False, str(error)
+
+    def recycle_plugin_versions(self, plugin_id: str) -> Dict[str, Any]:
+        """
+        回收指定插件不再被任何实例引用、也不在保留窗口内的已装版本目录
+        回收删的是用户的插件源码，因此与切版、安装收进同两把锁，且两把都用非阻塞方式取、
+        抢不到立即拒绝：包写入锁抢不到说明磁盘内容正在被另一个事务改写，删过去可能删到
+        一份正在写入的目录；quiesce 锁抢不到说明有启停或重载在途，判定引用集合与真正
+        执行删除之间会被插进一次实例状态迁移。回收本身是尽力而为的磁盘清理，等不如让
+        它下次再来——排队等待反而会把这两把锁的持有时间拉长，制造出真正的锁序风险
+        :param plugin_id: 插件ID
+        :return: 含 removed（已删除版本号列表）与 kept（版本号到保留理由的映射）的字典
+        :raise LookupError: 插件不存在，或 plugin_id 实为某个分身自身的实例 ID
+        :raise RuntimeError: 安装事务状态无从确认，本次回收拒绝删除任何目录
+        :raise PluginMutationRejectedError: 处于停机封口窗口，或两把锁之一被占用
+        """
+        with self.mutation(f"回收插件 {plugin_id} 已装版本"):
+            package_lock_state = self._try_acquire_plugin_package_write()
+            if package_lock_state is None:
+                raise PluginMutationRejectedError(
+                    f"回收插件 {plugin_id} 已装版本（插件包正在被另一个事务写入）"
+                )
+            try:
+                if not self._plugin_quiesce_lock.acquire(blocking=False):
+                    raise PluginMutationRejectedError(
+                        f"回收插件 {plugin_id} 已装版本（插件实例正在启停或切换版本）"
+                    )
+                try:
+                    outcome = self._plugin_version_binding.recycle_versions(plugin_id)
+                finally:
+                    self._plugin_quiesce_lock.release()
+            finally:
+                self._release_plugin_package_write(package_lock_state)
+        if outcome["removed"]:
+            self._settle_monitor_after_recycle(plugin_id)
+        return outcome
+
+    def _settle_monitor_after_recycle(self, plugin_id: str) -> None:
+        """回收确实删过目录后给文件监控留一段收敛期，挡掉由删除引发的重载。
+
+        开发模式下的监控把插件目录里的任何文件变化都当成源码更新去重载插件，而回收
+        删的正是这个目录下的子目录。这里只延后收敛期、不登记抑制计数：抑制计数同时是
+        「安装在途」判据的磁盘侧一半，先登记再回收会让回收自己判定自己在途、整次跳过。
+
+        :param plugin_id: 刚完成回收的插件ID
+        """
+        with self._monitor_suppression_lock:
+            self._monitor_suppressed_until[plugin_id.lower()] = (
+                time.monotonic() + self.MONITOR_SETTLE_SECONDS
+            )
+
+    def recycle_all_plugin_versions(self) -> Dict[str, Dict[str, Any]]:
+        """
+        回收全部源码插件不再被引用、也不在保留窗口内的已装版本目录
+        单个插件的回收失败（引用集合读不出、安装在途、包写入争用、停机封口）只记错误
+        日志并跳过该插件：回收是尽力而为的磁盘清理，没有任何一个插件值得让它阻断其余
+        插件的清理，更不值得阻断启动收尾
+        范围取类注册表里的插件，因此装着却一次都没加载成功的插件（例如导入报错）不会
+        被自动回收，它的旧版本目录要靠手动端点清理。这是刻意的保守：那种插件的引用
+        事实只剩绑定一半、运行态一半查不到，逐个由人确认比批量自动删更稳
+        :return: 插件ID到回收结果的映射，只含本次确实完成了回收的插件
+        """
+        results: Dict[str, Dict[str, Any]] = {}
+        for plugin_id in self.get_plugin_ids():
+            # 分身与本体共享同一份源码，版本是源插件的属性；按分身 ID 再回收一次
+            # 只会拿同一个插件目录重复走一遍，且会被绑定服务按「这是分身」拒绝
+            if self.get_plugin_instance(plugin_id) is not None:
+                continue
+            try:
+                results[plugin_id] = self.recycle_plugin_versions(plugin_id)
+            except Exception as error:  # noqa: BLE001 - 单个插件失败不得阻断其余插件
+                logger.error(f"插件 {plugin_id} 版本回收失败，跳过本次回收：{error}")
+        return results
 
     def get_plugin_instance_log_levels(self, plugin_id: str) -> List[Dict[str, Any]]:
         """

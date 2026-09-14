@@ -14,11 +14,13 @@ from functools import cmp_to_key
 from pathlib import Path
 from typing import Any, Optional
 
-from app.foundation.version import compare_version
 from app.runtime.extensions.plugin.readiness import plugin_multi_version_blockers
 from app.runtime.extensions.plugin.version import (
+    PLUGIN_VERSION_RETENTION_WINDOW,
+    compare_plugin_versions,
     plugin_version_dirs,
     read_plugin_versions_manifest,
+    recycle_plugin_version_directories,
 )
 from app.schemas.plugin import PluginInstance, PluginRuntimeStatus
 
@@ -46,15 +48,6 @@ def _never_pending(_plugin_id: str) -> bool:
     由 ``set_instance_version`` 失败关闭。
     """
     return False
-
-
-def _compare_versions(left: str, right: str) -> int:
-    """按语义比较两个版本号，供版本列表排序使用。"""
-    if compare_version(left, ">", right):
-        return 1
-    if compare_version(right, ">", left):
-        return -1
-    return 0
 
 
 class PluginVersionInventory:
@@ -146,6 +139,36 @@ class PluginVersionInventory:
         """解析实例按其绑定本应运行的版本：钉住即钉住那版，否则即当前版本。"""
         return instance.pinned_version or current_version
 
+    def referenced_versions(self, plugin_id: str) -> set[str]:
+        """收集该插件下任何实例仍在引用的版本号，供版本回收判定「谁还用得着」。
+
+        每个实例贡献两个版本号，缺一不可：按绑定解析出的**期望版本**（钉住即那一版，
+        没钉版即当前版本），以及此刻**实际加载**中的版本。一次刚把绑定落盘、重载却
+        还没生效的切换里这两者正好不同——期望版本是要切过去的新版本，内存里跑的仍是
+        旧版本，只记其中一个必然把另一半删掉：删新版本会让重载落空，删旧版本则会把
+        一个正在服务请求的实例的源码从脚下抽走。
+
+        本体与全部分身一视同仁，且分身不按启用位过滤：停用的分身随时可能被重新启用，
+        把它钉住的版本当成无人引用删掉，等于让它再也起不来。
+
+        集合来自对实例存储与运行表的实测查询；任何读取失败都原样向上抛出，由回收调用方
+        跳过本次回收，而不是在这里退化成空集——凑不齐引用集合时按空集继续就是把「不知道
+        谁在用」当成「没人在用」，那正是误删正在跑的版本的唯一路径。
+
+        :param plugin_id: 源插件ID
+        :return: 被引用的版本号集合
+        """
+        current_version = self.current_version(plugin_id)
+        referenced: set[str] = set()
+        for instance in (self.host_instance(plugin_id), *self.clones_for_source(plugin_id)):
+            expected = self.expected_version(instance, current_version)
+            if expected:
+                referenced.add(expected)
+            running = self.running_version(instance.instance_id)
+            if running:
+                referenced.add(running)
+        return referenced
+
     def resolve_target_version(
         self,
         plugin_id: str,
@@ -169,7 +192,7 @@ class PluginVersionInventory:
             return current
         if not installed:
             return None
-        return max(installed, key=cmp_to_key(_compare_versions))
+        return max(installed, key=cmp_to_key(compare_plugin_versions))
 
     def creates_version_coexistence(
         self,
@@ -235,7 +258,7 @@ class PluginVersionInventory:
             # 「按版本号升序」以及加载解析当前版本时用的比较口径都对不上
             for version, path in sorted(
                 self.installed_versions(plugin_id).items(),
-                key=lambda item: cmp_to_key(_compare_versions)(item[0]),
+                key=lambda item: cmp_to_key(compare_plugin_versions)(item[0]),
             )
         ]
         instances = [
@@ -303,6 +326,41 @@ class PluginVersionBinding:
         :raise LookupError: 插件不存在，或 ``plugin_id`` 实为某个分身自身的实例 ID
         """
         return self._inventory.overview(plugin_id)
+
+    def recycle_versions(
+        self,
+        plugin_id: str,
+        retention: int = PLUGIN_VERSION_RETENTION_WINDOW,
+    ) -> dict[str, Any]:
+        """回收该插件不再被任何实例引用、也不在保留窗口内的已装版本目录。
+
+        引用集合先于安装事务查询算出：它读的是实例表与运行表，不碰磁盘，先算不会
+        让在途安装的窗口白白延长。安装事务查询失败一律向上抛出而不是按「没有在途」
+        继续——那道判据存在的意义正是拦住「磁盘内容正在变」的时刻，把未知当成安全
+        等于把它取消掉。
+
+        :param plugin_id: 源插件ID
+        :param retention: 额外按登记时间保留的最近版本数
+        :return: 含 removed 与 kept 的回收结果
+        :raise LookupError: 插件不存在，或 ``plugin_id`` 实为某个分身自身的实例 ID
+        :raise RuntimeError: 安装事务状态无从确认，本次回收拒绝删除任何目录
+        """
+        if not self._inventory.plugin_exists(plugin_id):
+            raise LookupError(f"插件 {plugin_id} 不存在")
+        if self._inventory.clone_instance(plugin_id) is not None:
+            raise LookupError(f"{plugin_id} 是分身实例，请使用源插件 ID 回收版本")
+        referenced = self._inventory.referenced_versions(plugin_id)
+        try:
+            pending = bool(self._pending_installation(plugin_id))
+        except Exception as error:  # noqa: BLE001 - 判据未知时必须拒绝删除
+            self._logger.error(f"检查插件 {plugin_id} 的安装事务失败，跳过版本回收：{error}")
+            raise RuntimeError(f"无法确认插件 {plugin_id} 的安装状态，拒绝版本回收") from error
+        return recycle_plugin_version_directories(
+            self._inventory.plugin_root(plugin_id),
+            referenced,
+            retention,
+            has_pending_installation=pending,
+        )
 
     def set_instance_version(
         self,

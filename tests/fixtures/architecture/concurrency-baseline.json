@@ -673,6 +673,7 @@
   },
   "app/startup/lifecycle/__init__.py:app.runtime.execution.run_in_threadpool_to_completion": {
     "owners": {
+      "init_extra": 1,
       "offload_shutdown_callback.invoke": 1,
       "prepare_plugin_restore": 1
     },

@@ -166,6 +166,18 @@ class PluginInstanceVersionUpdateRequest(BaseModel):  # type: ignore[misc]
     )
 
 
+class PluginVersionRecycleOutcome(BaseModel):  # type: ignore[misc]
+    """插件已装版本目录回收结果。"""
+
+    removed: List[str] = Field(
+        default_factory=list, description="本次已删除的版本号列表"
+    )
+    kept: Dict[str, str] = Field(
+        default_factory=dict,
+        description="未被删除的版本号到保留理由的映射，理由可直接呈现给用户",
+    )
+
+
 class PluginInstanceEnabledRequest(BaseModel):  # type: ignore[misc]
     """启用或停用一个插件实例的请求参数。"""
 

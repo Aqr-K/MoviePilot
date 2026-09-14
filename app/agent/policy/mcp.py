@@ -237,6 +237,7 @@ OPERATION_DESCRIPTIONS = {
     "plugin.instance.set_enabled": "Enable or disable one plugin instance, host or clone; disabling only stops it running and keeps its configuration for a later re-enable.",
     "plugin.version.overview": "List one plugin's installed source versions and, for every instance including the plugin itself, the version it is pinned to and the version it is actually running.",
     "plugin.version.set": "Pin one plugin instance to an installed version, or clear the pin so it follows the plugin's current version; either way the instance is stopped and started again.",
+    "plugin.version.recycle": "Delete one plugin's installed source version directories that no instance references and that fall outside the recent-version retention window; returns what was removed and why everything else was kept.",
     "plugin.instance.purge": "Permanently delete one plugin instance's selected data: saved configuration, plugin data rows, its own database and its data directory; a clone also loses its instance record. Nothing is deleted unless explicitly selected.",
 }
 
