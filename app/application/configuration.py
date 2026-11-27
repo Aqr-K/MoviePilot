@@ -8,11 +8,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, Optional, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol, TypeVar, cast
 
 from app.application.database import AsyncDatabaseExecutor
 from app.schemas.common import JsonData
 from app.schemas.types import MediaType, SystemConfigKey
+
+if TYPE_CHECKING:
+    from app.application.messaging.channel.platform import ChannelPlatformCatalog
+
 
 # 系统配置值在进入持久化端口前使用的规范化函数。
 SystemConfigValueNormalizer = Callable[[Any, Any], Any]
@@ -571,11 +575,13 @@ class RuntimeConfiguration:
     :param api: 按需构建 API 请求配置快照的工厂
     :param scheduler: 按需构建调度配置快照的工厂
     :param chain: 按需构建业务链配置快照的工厂
+    :param channels: 从模块能力清单获得平台扩展的只读目录
     """
 
     api: Callable[[], ApiRuntimeConfig]
     scheduler: Callable[[], SchedulerRuntimeConfig]
     chain: Callable[[], ChainRuntimeConfig]
+    channels: Callable[[], "ChannelPlatformCatalog"] | None = None
 
 
 class RuntimeSettingsService:
@@ -781,6 +787,14 @@ class SystemConfigService:
             raise RuntimeError("系统配置异步数据库执行端口尚未配置")
         return cast(T, await self._async_executor.run(partial(self.update_atomically, key, mutation)))
 
+    async def async_publish_committed_change(self, key: SystemConfigKey) -> None:
+        """
+        发布单个已提交配置键的失效信号，监听器按通知重读最新快照。
+
+        :param key: 已在调用方事务中写入的配置键，不随事件附带私有配置值
+        """
+        await self._publish_async_change(key, None, True)
+
     async def async_delete(self, key: Any) -> Any:
         """
         异步删除配置，并等待数据库提交或回滚完成。
@@ -959,3 +973,12 @@ def get_chain_runtime_config_snapshot() -> ChainRuntimeConfig:
     if _runtime_configuration is None:
         raise RuntimeError("运行时配置尚未装配")
     return _runtime_configuration.chain()
+
+
+def get_channel_platform_catalog() -> "ChannelPlatformCatalog":
+    """
+    返回组合根提供的平台协议目录，未装配时稳定拒绝。
+    """
+    if _runtime_configuration is None or _runtime_configuration.channels is None:
+        raise RuntimeError("渠道平台目录尚未装配")
+    return _runtime_configuration.channels()

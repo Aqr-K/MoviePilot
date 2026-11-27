@@ -7,11 +7,14 @@ from dataclasses import dataclass as _dataclass
 from dataclasses import field as _field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
+from typing import Literal as _Literal
 
 from pydantic import BaseModel, Field, field_validator
+from pydantic import ConfigDict as _ConfigDict
 from pydantic import PrivateAttr as _PrivateAttr
 
 from app.schemas.common import JsonData
+from app.schemas.delivery import DeliveryResult as _DeliveryResult
 from app.schemas.notification import ChannelCapabilityManager as _ChannelCapabilityManager
 from app.schemas.notification import NotificationTextFormat as _NotificationTextFormat
 from app.schemas.types import ContentType, MessageType, NotificationChannel
@@ -51,7 +54,7 @@ class MessageResponse(BaseModel):
     source: Optional[str] = Field(default=None, description="消息来源")
     metadata: Optional[Dict[str, JsonData]] = Field(
         default=None,
-        description="渠道自定义上下文（如飞书流式卡片 card_id/element_id/sequence）",
+        description="由所属平台解释的发送上下文，公共用例不解释协议字段",
     )
     success: bool = Field(default=False, description="是否发送成功")
 
@@ -166,7 +169,7 @@ class IncomingMessage(BaseModel):
         mime_type: Optional[str] = Field(default=None, description="附件的 MIME 类型")
         size: Optional[int] = Field(default=None, description="附件大小，单位为字节")
 
-    userid: Optional[Union[str, int]] = Field(default=None, description="用户ID")
+    userid: Optional[Union[str, int]] = Field(default=None, description="平台实际发送者ID，不得填入群或回复目标")
     username: Optional[Union[str, int]] = Field(default=None, description="用户名称")
     is_channel_admin: Optional[bool] = Field(default=None, description="渠道适配器依据稳定用户 ID、管理员名单及渠道主用户 ID 生成的授权事实")
     channel: Optional[NotificationChannel] = Field(default=None, description="消息渠道")
@@ -177,12 +180,18 @@ class IncomingMessage(BaseModel):
     is_callback: Optional[bool] = Field(default=False, description="是否为回调消息")
     message_id: Optional[Union[str, int]] = Field(default=None, description="消息ID（用于回调时定位原消息）")
     chat_id: Optional[str] = Field(default=None, description="聊天ID（用于回调时定位聊天）")
+    thread_id: Optional[str] = Field(default=None, description="由平台解析的话题或线程 ID，缺失表示当前消息没有已知线程")
+    conversation_type: _Literal["private", "group", "unknown"] = Field(
+        default="unknown", description="受信渠道解析的会话类型；未知时不能证明私聊身份"
+    )
     reply_to_message_id: Optional[Union[str, int]] = Field(default=None, description="回复目标消息ID（用于 ForceReply 等回复场景）")
     callback_query: Optional[Dict[str, Any]] = Field(default=None, description="完整的回调查询信息（原始数据）")
     images: Optional[List[MessageImage]] = Field(default=None, description="图片列表（图片URL或file_id）")
     audio_refs: Optional[List[str]] = Field(default=None, description="语音/音频引用列表")
     files: Optional[List[MessageAttachment]] = Field(default=None, description="文件附件列表")
     callback_data: Optional[str] = Field(default=None, description="结构化按钮回调数据（优先于 CALLBACK: 文本前缀）")
+
+    _admission_proof: object = _PrivateAttr(default=None)
 
     @field_validator("images", mode="before")
     @classmethod
@@ -278,6 +287,9 @@ class Message(BaseModel):
     link: Optional[str] = Field(default=None, description="链接")
     userid: Optional[Union[str, int]] = Field(default=None, description="用户ID")
     username: Optional[Union[str, int]] = Field(default=None, description="用户名称")
+    subscription_owner_identity: Optional[str] = Field(
+        default=None, description="订阅或下载通知的稳定账号身份，空字符串表示旧记录待查证",
+    )
     date: Optional[str] = Field(default=None, description="时间")
     action: Optional[int] = Field(default=1, description="消息方向")
     targets: Optional[dict[str, Any]] = Field(default=None, description="消息目标用户ID字典，未指定用户ID时使用")
@@ -285,21 +297,139 @@ class Message(BaseModel):
         default=None,
         description="按钮列表，格式：[[{\"text\": \"按钮文本\", \"callback_data\": \"回调数据\", \"url\": \"链接\"}]]",
     )
-    force_reply: bool = Field(default=False, description="Telegram ForceReply 回复标记")
+    force_reply: bool = Field(default=False, description="平台原生回复请求标记，由所属模块解释")
     original_message_id: Optional[Union[str, int]] = Field(default=None, description="原消息ID，用于编辑消息")
     original_chat_id: Optional[str] = Field(default=None, description="原消息的聊天ID，用于编辑消息")
+    thread_id: Optional[str] = Field(default=None, description="原会话内的回复话题或线程 ID")
+    delivery_kind: Optional[_Literal["event_notification", "reply", "task_result", "authorization_receipt"]] = Field(
+        default=None, description="宿主的投递语义，决定使用通知开关还是交互开关",
+    )
     private_delivery: bool = Field(default=False, description="是否必须按用户身份投递到私聊，禁止回退原会话或最近会话映射")
-    disable_web_page_preview: Optional[bool] = Field(default=None, description="是否禁用链接预览（仅Telegram支持）")
-    parse_mode: Optional[str] = Field(default=None, description="消息文本格式；Telegram 支持 MarkdownV2、HTML、plain，飞书直发支持 plain")
+    disable_web_page_preview: Optional[bool] = Field(default=None, description="链接预览偏好，实际支持与校验由所属平台决定")
+    parse_mode: Optional[str] = Field(default=None, description="平台文本格式提示，由所属模块校验和编码")
     rich_message: Optional[str] = Field(
         default=None,
-        description="Telegram Rich Message 完整 Markdown 正文；其他渠道可使用 text 作为回退",
+        description="平台富文本兼容正文，公共文本回退使用 text",
     )
     rich_content: Optional[NotificationContent] = Field(default=None, description="渠道无关的结构化通知，宿主按能力渲染；text 始终保留为纯文本回退")
     save_history: bool = Field(default=True, description="是否写入消息历史")
 
     # 通知隔离路由范围，仅在运行时传递给通知模块，不写入消息数据
     _notification_route_scope: Optional[str] = _PrivateAttr(default=None)
+    _delivery_connection: tuple[str, str] | None = _PrivateAttr(default=None)
+    _delivery_connections: frozenset[tuple[str, str]] | None = _PrivateAttr(default=None)
+    _delivery_results: Optional[list[_DeliveryResult]] = _PrivateAttr(default=None)
+    _attachment_part: int = _PrivateAttr(default=0)
+    _attachment_part_final: bool = _PrivateAttr(default=True)
+    _task_recipient: tuple[str, int, str] | None = _PrivateAttr(default=None)
+
+    _notification_owner_identity: str | None = _PrivateAttr(default=None)
+
+    @property
+    def notification_owner_identity(self) -> str | None:
+        """
+        返回不随改名或重建账号复用的消息归属。
+        """
+        return self.subscription_owner_identity or self._notification_owner_identity
+
+    def set_notification_owner_identity(self, identity: str) -> None:
+        """
+        记录通知路由已经按仓储核对的账号身份。
+        """
+        self._notification_owner_identity = identity
+
+    def bind_task_recipient(self, authorization_id: str, user_id: int, identity: str) -> None:
+        """
+        保留宿主签发的任务接收人供出队检查，序列化时不携带该授权。
+
+        :param authorization_id: 任务冻结的渠道成员 ID
+        :param user_id: 执行账号的主键
+        :param identity: 执行账号的不可变身份
+        """
+        self._task_recipient = (authorization_id, user_id, identity)
+
+    @property
+    def task_recipient(self) -> tuple[str, int, str] | None:
+        """
+        返回当前进程内任务投递的授权和账号绑定。
+        """
+        return self._task_recipient
+
+    def bind_delivery_connection(self, connection_id: str, identity_namespace: str) -> None:
+        """
+        将已验证的宿主投递绑定到连接与身份空间。
+
+        :param connection_id: 当前连接不可变 ID
+        :param identity_namespace: 当前连接的身份空间
+        """
+        self._delivery_connection = (connection_id, identity_namespace)
+
+    @property
+    def delivery_connection(self) -> tuple[str, str] | None:
+        """
+        返回运行时连接限制，该限制不写入外部消息协议。
+        """
+        return self._delivery_connection
+
+    def limit_delivery_connections(self, connections: frozenset[tuple[str, str]]) -> None:
+        """
+        为持久化派发应用首次认领时的连接及身份范围。
+
+        :param connections: 已保存且允许使用的连接 ID 和身份空间
+        """
+        self._delivery_connections = connections
+
+    def accepts_delivery_connection(self, connection_id: str | None, identity_namespace: str | None) -> bool:
+        """
+        检查当前连接是否仍属于这次持久投递的范围。
+
+        :param connection_id: 渠道实例的稳定 ID
+        :param identity_namespace: 当前目标身份空间
+        :return: 普通通知或首次计划允许的连接返回 True
+        """
+        if self._delivery_connections is None:
+            return True
+        return bool(connection_id and identity_namespace and (connection_id, identity_namespace) in self._delivery_connections)
+
+    def set_attachment_part(self, index: int, *, final: bool) -> None:
+        """
+        标记本次派发里的组合附件位置。原始消息和存储协议不携带此位置。
+        """
+        self._attachment_part = index
+        self._attachment_part_final = final
+
+    @property
+    def attachment_part_offset(self) -> int:
+        """
+        给组合附件预留独立分段范围，保持单条通知既有分段编号。
+        """
+        return self._attachment_part * 4096
+
+    @property
+    def attachment_part_final(self) -> bool:
+        """
+        标记已处理的部分是否结束本次组合投递。
+        """
+        return self._attachment_part_final
+
+    def collect_delivery_results(self) -> list[_DeliveryResult]:
+        """
+        为一次发送创建独立结果记录，序列化消息时不保存回执。
+
+        :return: 本次发送的可追加结果列表
+        """
+        if self._delivery_results is None:
+            self._delivery_results = []
+        return self._delivery_results
+
+    def record_delivery_result(self, result: _DeliveryResult) -> None:
+        """
+        向本次派发已登记的回执列表追加一项。
+
+        :param result: 来自匹配实例的单项结果
+        """
+        if self._delivery_results is not None:
+            self._delivery_results.append(result)
 
     def channel_text(self, channel: NotificationChannel, config: Optional[dict[str, object]] = None) -> Optional[str]:
         """
@@ -446,3 +576,18 @@ class AgentWebChoiceRequest(BaseModel):
     callback_data: str = Field(..., min_length=1, description="Agent 工具生成的按钮回调数据")
     original_message_id: Optional[Union[str, int]] = Field(default=None, description="WebAgent 原助手消息 ID，用于传统按钮回调原地编辑")
     original_chat_id: Optional[Union[str, int]] = Field(default=None, description="WebAgent 原聊天 ID，用于传统按钮回调原地编辑")
+
+
+class MessageAttachmentRead(BaseModel):
+    """
+    模块产生的读取事实，不包含授权或任意可执行对象。
+    """
+
+    model_config = _ConfigDict(extra="forbid", frozen=True)
+
+    method: str | None = Field(default=None, description="既有模块下载方法；与 URL 二选一")
+    parameters: dict[str, str] = Field(default_factory=dict, description="模块方法拥有的引用参数")
+    url: str | None = Field(default=None, description="模块解码后的 HTTP 地址，仍经过宿主网络策略")
+    encoding: _Literal["bytes", "data_url", "base64_jpeg"] = Field(default="bytes", description="既有模块方法的返回编码")
+    audio_filename: str = Field(default="input.ogg", description="音频扩展名推断失败时使用的文件名")
+    exact_filename: bool = Field(default=False, description="平台已确认格式，无需根据引用推断扩展名")
