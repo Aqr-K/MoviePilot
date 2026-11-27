@@ -9,7 +9,13 @@ import pytest
 from app.application.messaging.channel import platform as contracts
 from app.domain.authorization import ChannelActor, channel_actor_ids
 from app.modules._base.channel import ChannelPlatformBase
-from app.schemas.channel import ChannelConnection, ChannelPlatformCapabilities, InteractionPolicy, NotificationRoute, NotificationRule
+from app.schemas.channel import (
+    ChannelConnection,
+    ChannelPlatformCapabilities,
+    InteractionPolicy,
+    NotificationRoute,
+    NotificationRule,
+)
 from app.schemas.message import Message
 
 
