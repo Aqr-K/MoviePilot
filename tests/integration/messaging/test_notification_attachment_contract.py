@@ -71,7 +71,7 @@ def _module(monkeypatch: pytest.MonkeyPatch, channel, module_class, client):
     return module
 
 
-@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] not in {Telegram}])
+@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] not in {Telegram, WeChat, WeChatBot}])
 def test_same_plugin_image_payload_is_adapted_by_host(
     monkeypatch: pytest.MonkeyPatch, channel, module_class, client_class,
 ) -> None:
@@ -109,7 +109,7 @@ def test_same_plugin_image_payload_is_adapted_by_host(
     assert message.native_image is True
 
 
-@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] not in {Telegram}])
+@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] not in {Telegram, WeChat, WeChatBot}])
 def test_same_plugin_file_payload_preserves_attachment_and_caption(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, channel, module_class, client_class,
 ) -> None:
@@ -452,7 +452,7 @@ def test_feishu_native_image_broadcast_reports_failures(monkeypatch, tmp_path, f
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] in {Telegram}])
+@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] in {Telegram, WeChat, WeChatBot}])
 @pytest.mark.parametrize("native_image", [True, False])
 def test_same_plugin_media_payload_reaches_tracked_delivery(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, channel, module_class, client_class, native_image,

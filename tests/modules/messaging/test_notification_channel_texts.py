@@ -19,8 +19,10 @@ from app.modules.synologychat import SynologyChatModule
 from app.modules.telegram.module import TelegramModule
 from app.modules.vocechat import VoceChatModule
 from app.modules.wechat import WechatModule
+from app.modules.wechat.wechat import WeChat
 from app.modules.wechat.wechatbot import WeChatBot
 from app.schemas.message import Message, NotificationBlock, NotificationContent
+from app.schemas.system import NotificationConf
 from app.schemas.types import NotificationChannel
 
 
@@ -254,17 +256,18 @@ def test_wechat_bot_and_application_mode_remain_independent():
     module = WechatModule()
     bot = object.__new__(WeChatBot)
     bot.send_msg = Mock()
-    application = SimpleNamespace(send_msg=Mock())
+    application = object.__new__(WeChat)
+    application.send_tracked_message = Mock()
     message = _message()
     message.rich_content = NotificationContent(blocks=[NotificationBlock(title="富文本结果")])
     with (patch.object(module, "get_configs", return_value={
-        "bot": SimpleNamespace(name="bot", type="wechat", config={"WECHAT_MODE": "bot"}),
-        "app": SimpleNamespace(name="app", type="wechat", config={"WECHAT_MODE": "app"})}),
+        "bot": NotificationConf(id="bot", type="wechat", name="bot", config={"WECHAT_MODE": "bot"}),
+        "app": NotificationConf(id="app", type="wechat", name="app", config={"WECHAT_MODE": "app"})}),
           patch.object(module, "check_message", return_value=True),
           patch.object(module, "get_instance", side_effect=[bot, application])):
         module.post_message(message)
     assert bot.send_msg.call_args.kwargs["text"] == "**富文本结果**"
-    assert application.send_msg.call_args.kwargs["text"] == "原有完整正文"
+    assert application.send_tracked_message.call_args.kwargs["text"] == "原有完整正文"
     assert message.text == "原有完整正文"
 
 

@@ -16,7 +16,6 @@ from app.modules.feishu import feishu as feishu_module
 from app.modules.qqbot import qqbot as qqbot_module
 from app.modules.slack import slack as slack_module
 from app.modules.telegram import telegram as telegram_module
-from app.modules.wechat import wechatbot as wechat_module
 from app.modules.wechatclawbot import wechatclawbot as clawbot_module
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -242,7 +241,7 @@ def test_submit_message_to_host_copies_payload_and_reports_admission_failure():
 
 @pytest.mark.parametrize(
     ("module", "client_type", "source_attr"),
-    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name'), (wechat_module, wechat_module.WeChatBot, '_config_name')],
+    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name')],
 )
 def test_threaded_channels_submit_through_managed_executor(
     monkeypatch,
