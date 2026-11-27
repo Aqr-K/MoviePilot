@@ -951,8 +951,8 @@
       "runtime_only": true
     }
   },
-  "edge_count": 10857,
-  "edge_sha256": "538292c75d7d015829f9dafec971daca951b4a617b283ec7dda539a88b5ad8cb",
+  "edge_count": 10859,
+  "edge_sha256": "3be6b006209881f8faa211dab7b9ec34a160704289a05c7dfee728348e8cb242",
   "edges": [
     "app -> app.foundation",
     "app -> app.foundation.environment",
@@ -7245,6 +7245,8 @@
     "app.db.models.user -> app.db.base",
     "app.db.models.userconfig -> app.db",
     "app.db.models.userconfig -> app.db.base",
+    "app.db.models.webpush -> app.db",
+    "app.db.models.webpush -> app.db.base",
     "app.db.models.widget -> app.db",
     "app.db.models.widget -> app.db.base",
     "app.db.models.workflow -> app.db",
@@ -11812,7 +11814,7 @@
     "app.workflow.actions.transfer_file -> app.workflow",
     "app.workflow.actions.transfer_file -> app.workflow.actions"
   ],
-  "module_count": 1229,
+  "module_count": 1230,
   "modules": [
     "app",
     "app.adapters",
@@ -12479,6 +12481,7 @@
     "app.db.models.transfersettlementreceipt",
     "app.db.models.user",
     "app.db.models.userconfig",
+    "app.db.models.webpush",
     "app.db.models.widget",
     "app.db.models.workflow",
     "app.db.oper",
