@@ -5,7 +5,6 @@
 import base64
 import hashlib
 import hmac
-from types import SimpleNamespace
 from unittest.mock import Mock
 from urllib.parse import parse_qs, urlsplit
 
@@ -13,6 +12,7 @@ from app.modules.dingtalk import DingTalkModule
 from app.modules.dingtalk.dingtalk import DingTalk
 from app.schemas.message import Message
 from app.schemas.notification import ChannelCapability, ChannelCapabilityManager
+from app.schemas.system import NotificationConf
 from app.schemas.types import MessageType, NotificationChannel
 
 
@@ -105,7 +105,7 @@ def test_module_routes_matching_notifications_to_dingtalk_client(monkeypatch) ->
     module = DingTalkModule()
     module._channel = NotificationChannel.DingTalk
     client = Mock()
-    config = SimpleNamespace(name="家庭群", switchs=[MessageType.Organize.value])
+    config = NotificationConf(name='家庭群', switchs=[MessageType.Organize.value], type='dingtalk')
     monkeypatch.setattr(module, "get_configs", lambda: {config.name: config})
     monkeypatch.setattr(module, "get_config", lambda name=None: config)
     monkeypatch.setattr(module, "get_instance", lambda name=None: client)
@@ -128,7 +128,7 @@ def test_module_skips_unsupported_command_registration(monkeypatch) -> None:
     钉钉机器人不支持命令 API 时应跳过基类命令注册流程。
     """
     module = DingTalkModule()
-    config = SimpleNamespace(name="家庭群", config={})
+    config = NotificationConf(name='家庭群', config={}, type='dingtalk')
     get_instance = Mock()
     monkeypatch.setattr(module, "get_configs", lambda: {config.name: config})
     monkeypatch.setattr(module, "get_instance", get_instance)
