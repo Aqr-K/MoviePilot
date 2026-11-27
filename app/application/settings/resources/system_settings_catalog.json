@@ -1423,6 +1423,11 @@
       "enum_name": "BestVersionFilterRuleGroups",
       "source_file": "app/schemas/types.py"
     },
+    "ChannelSettings": {
+      "description": "共享渠道连接、通知路由和交互策略的原子配置快照。",
+      "enum_name": "ChannelSettings",
+      "source_file": "app/schemas/types.py"
+    },
     "CustomFilterRules": {
       "description": "用户自定义规则",
       "enum_name": "CustomFilterRules",
