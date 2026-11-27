@@ -413,7 +413,6 @@ class ChainRuntimeConfig:
     :param transfer_task_timeout: 外部接管的运行中整理任务无状态心跳超时（分钟），0 表示禁用
     :param scrape_follow_tmdb: 是否使用 TMDB 的季集编排刮削电视剧元数据
     :param metadata_cache_ttl: 识别元数据缓存的有效期，单位为秒
-    :param auto_download_user: 允许交互搜索后自动下载的用户标识，多个用逗号分隔，None 表示未配置
     :param resource_url: 资源搜索页面地址，未配置时为 None
     :param history_url: 整理历史页面地址，未配置时为 None
     :param downloading_url: 正在下载页面地址，未配置时为 None
@@ -508,7 +507,6 @@ class ChainRuntimeConfig:
     transfer_task_timeout: int = 120
     scrape_follow_tmdb: bool = True
     metadata_cache_ttl: int = 3600
-    auto_download_user: Optional[str] = None
     resource_url: Optional[str] = None
     history_url: Optional[str] = None
     downloading_url: Optional[str] = None

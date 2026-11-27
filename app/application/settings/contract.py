@@ -300,12 +300,9 @@ SYSTEMCONFIG_CONTRACTS: dict[SystemConfigKey, _SystemConfigContract] = {
     SystemConfigKey.DanmakuBindings: _internal_contract(
         "media_servers", Optional[dict[str, JsonData]]
     ),
-    SystemConfigKey.Notifications: _contract(
-        "notifications",
-        Optional[list[NotificationConf]],
-        operations=_LIST_OBJECT_OPERATIONS,
-        match_field="name",
-        sensitive=True,
+    SystemConfigKey.Notifications: _managed_contract(
+        "notifications", Optional[list[NotificationConf]],
+        "notification/config", sensitive=True,
     ),
     SystemConfigKey.ChannelSettings: _internal_contract(
         "notifications", Optional[ChannelSettings], sensitive=True,
