@@ -1,5 +1,5 @@
 """
-宿主 SDK 连接绑定入口与显式插件 HTTP 兼容契约。
+宿主 SDK 单路径入站、生命周期封口与显式插件 HTTP 兼容契约。
 """
 
 from pathlib import Path
@@ -239,29 +239,15 @@ def test_submit_message_to_host_copies_payload_and_reports_admission_failure():
     assert ingress.submit_message_to_host({}, "channel", submit=reject) is False
 
 
-
-
-
-
-
-
-
-
-def test_message_modules_cannot_reimplement_loopback_endpoint():
-    """
-    消息模块不得重新拼接宿主 URL，新增渠道必须复用统一 ingress。
-    """
-    violations = []
-    for path in (PROJECT_ROOT / "app" / "modules").rglob("*.py"):
-        if "/api/v1/message" in path.read_text(encoding="utf-8-sig"):
-            violations.append(path.relative_to(PROJECT_ROOT).as_posix())
-
-    assert violations == []
-
-
 @pytest.mark.parametrize(
     "module,client_type,source_attr",
-    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name'), (telegram_module, telegram_module.Telegram, '_config_name'), (slack_module, slack_module.Slack, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
+    [
+        (feishu_module, feishu_module.Feishu, "_name"),
+        (qqbot_module, qqbot_module.QQBot, "_config_name"),
+        (telegram_module, telegram_module.Telegram, "_config_name"),
+        (slack_module, slack_module.Slack, "_config_name"),
+        (clawbot_module, clawbot_module.WechatClawBot, "_config_name"),
+    ],
 )
 @pytest.mark.parametrize("accepted", [True, False, None])
 def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type, source_attr, accepted):
@@ -285,7 +271,6 @@ def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type
     assert port.sync_calls == [] and port.async_calls == []
 
 
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("accepted", [True, False, None])
 async def test_discord_uses_only_the_bound_ingress(monkeypatch, accepted):
@@ -304,6 +289,17 @@ async def test_discord_uses_only_the_bound_ingress(monkeypatch, accepted):
     port = ingress._message_ingress_snapshot()
     assert port.sync_calls == [] and port.async_calls == []
 
+
+def test_message_modules_cannot_reimplement_loopback_endpoint():
+    """
+    消息模块不得重新拼接宿主 URL，新增渠道必须复用统一 ingress。
+    """
+    violations = []
+    for path in (PROJECT_ROOT / "app" / "modules").rglob("*.py"):
+        if "/api/v1/message" in path.read_text(encoding="utf-8-sig"):
+            violations.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert violations == []
 
 
 @pytest.mark.parametrize("outcome", ["accepted", "rejected", "stopped", "invalid_payload"])
@@ -335,7 +331,6 @@ def test_platform_payload_submission_preserves_queue_acknowledgement(monkeypatch
         assert call[0] is ingress._deliver_platform_payload and call[1] is receiver
         assert json.loads(call[2]) == payload
         assert call[3:] == ("fixture", NotificationChannel.Telegram, "connection", "telegram", "namespace", "TelegramModule", 1)
-
 
 
 def test_verified_event_claim_fails_closed_when_shared_store_is_unavailable(monkeypatch):
