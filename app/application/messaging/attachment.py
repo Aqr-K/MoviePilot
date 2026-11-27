@@ -4,17 +4,19 @@
 
 from pathlib import Path
 
+import app.application.messaging.channel as channel_platform
 from app.schemas.message import Message
 from app.schemas.notification import ChannelCapability, ChannelCapabilityManager
 from app.schemas.types import NotificationChannel
 
 
-def notification_parts(message: Message, channel: NotificationChannel) -> list[Message]:
+def notification_parts(message: Message, channel: NotificationChannel, *, provider: str | None = None) -> list[Message]:
     """
     为单个渠道生成互不污染的图片、附件或降级文本。
 
     :param message: 插件或宿主的统一消息；原对象及其路由范围保持不变
     :param channel: 当前模块渠道，由宿主查询能力，插件无需判断
+    :param provider: 当前连接的平台 owner，共享传输时必须明确指定
     :return: 顺序投递的消息；同时有图片和文件时保留二者且说明文字只发送一次
     """
     if message.image and message.file_path:
@@ -28,7 +30,22 @@ def notification_parts(message: Message, channel: NotificationChannel) -> list[M
         ]
     else:
         parts = [message]
-    return [_channel_part(part, channel) for part in parts]
+    try:
+        platform = channel_platform.platform_for_channel(channel.value, provider=provider)
+    except ValueError:
+        if provider is not None:
+            raise
+        matches = [entry for entry in channel_platform.platform_catalog().providers() if entry.channel == channel.value]
+        if matches:
+            raise ValueError("分段需要明确连接的平台 owner")
+        platform = None
+    if platform is not None:
+        parts = platform.split_notification(parts)
+    adapted = [_channel_part(part, channel) for part in parts]
+    if len(adapted) > 1:
+        for index, part in enumerate(adapted):
+            part.set_attachment_part(index, final=index == len(adapted) - 1)
+    return adapted
 
 
 def _channel_part(message: Message, channel: NotificationChannel) -> Message:
