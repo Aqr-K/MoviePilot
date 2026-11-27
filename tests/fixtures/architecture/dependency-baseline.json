@@ -951,8 +951,8 @@
       "runtime_only": true
     }
   },
-  "edge_count": 11024,
-  "edge_sha256": "c566b04210ee329e08d09b06100039954bcdbb6e1929b13da27b736be95c0ed9",
+  "edge_count": 11030,
+  "edge_sha256": "287b0fac9b3f17ad20ead2c515c6a18941286eac1be909ba3c884862f4bc032c",
   "edges": [
     "app -> app.foundation",
     "app -> app.foundation.environment",
@@ -9362,6 +9362,7 @@
     "app.modules.telegram.module -> app.application.messaging",
     "app.modules.telegram.module -> app.application.messaging.channel",
     "app.modules.telegram.module -> app.application.messaging.channel.admin",
+    "app.modules.telegram.module -> app.application.messaging.delivery",
     "app.modules.telegram.module -> app.application.security",
     "app.modules.telegram.module -> app.application.security.authorization",
     "app.modules.telegram.module -> app.domain",
@@ -9400,7 +9401,9 @@
     "app.modules.telegram.telegram -> app.runtime.settings",
     "app.modules.telegram.telegram -> app.runtime.thread",
     "app.modules.telegram.telegram -> app.schemas",
+    "app.modules.telegram.telegram -> app.schemas.delivery",
     "app.modules.telegram.telegram -> app.schemas.exception",
+    "app.modules.telegram.telegram -> app.schemas.message",
     "app.modules.theaudiodb -> app.adapters",
     "app.modules.theaudiodb -> app.adapters.network",
     "app.modules.theaudiodb -> app.adapters.network.http",
@@ -10688,6 +10691,9 @@
     "app.sdk._legacy.history -> app.schemas",
     "app.sdk._legacy.history -> app.schemas.file",
     "app.sdk._legacy.history -> app.schemas.transfer",
+    "app.sdk._legacy.ingress -> app.application",
+    "app.sdk._legacy.ingress -> app.application.messaging",
+    "app.sdk._legacy.ingress -> app.application.messaging.ingress",
     "app.sdk._legacy.site -> app.db",
     "app.sdk._legacy.site -> app.db.oper",
     "app.sdk._legacy.site -> app.db.oper.site",
@@ -11979,7 +11985,7 @@
     "app.workflow.actions.transfer_file -> app.workflow",
     "app.workflow.actions.transfer_file -> app.workflow.actions"
   ],
-  "module_count": 1235,
+  "module_count": 1236,
   "modules": [
     "app",
     "app.adapters",
@@ -13126,6 +13132,7 @@
     "app.sdk._legacy.cookiecloud",
     "app.sdk._legacy.domain",
     "app.sdk._legacy.history",
+    "app.sdk._legacy.ingress",
     "app.sdk._legacy.site",
     "app.sdk._legacy.subscribe",
     "app.sdk._legacy.transfer",

@@ -71,7 +71,7 @@ def _module(monkeypatch: pytest.MonkeyPatch, channel, module_class, client):
     return module
 
 
-@pytest.mark.parametrize("channel,module_class,client_class", _UPLOAD_CHANNELS)
+@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] not in {Telegram}])
 def test_same_plugin_image_payload_is_adapted_by_host(
     monkeypatch: pytest.MonkeyPatch, channel, module_class, client_class,
 ) -> None:
@@ -109,7 +109,7 @@ def test_same_plugin_image_payload_is_adapted_by_host(
     assert message.native_image is True
 
 
-@pytest.mark.parametrize("channel,module_class,client_class", _UPLOAD_CHANNELS)
+@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] not in {Telegram}])
 def test_same_plugin_file_payload_preserves_attachment_and_caption(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, channel, module_class, client_class,
 ) -> None:
@@ -450,3 +450,51 @@ def test_feishu_native_image_broadcast_reports_failures(monkeypatch, tmp_path, f
         assert deliver.call_args.args == ("image", {"image_key": "key"})
         caption.assert_not_called()
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] in {Telegram}])
+@pytest.mark.parametrize("native_image", [True, False])
+def test_same_plugin_media_payload_reaches_tracked_delivery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, channel, module_class, client_class, native_image,
+) -> None:
+    """
+    统一插件参数经过实际模块路由，到达当前实例的持久化附件入口。
+    """
+    client = client_class.__new__(client_class)
+    attachment_path = tmp_path / "source.txt"
+    attachment_path.write_text("attachment-content")
+    method = {
+        Telegram: "send_tracked_image" if native_image else "send_tracked_attachment",
+        Slack: "send_tracked_image" if native_image else "send_tracked_file",
+        Discord: "send_tracked_notification",
+        Feishu: "send_tracked_notification",
+        WeChat: "send_tracked_media",
+        WeChatBot: "send_msg" if native_image else "send_file",
+        WechatClawBot: "send_tracked_notification",
+    }[client_class]
+    send = Mock(return_value=True)
+    monkeypatch.setattr(client, method, send)
+    module = _module(monkeypatch, channel, module_class, client)
+    monkeypatch.setattr(plugin_base, "settings", SimpleNamespace(MP_DOMAIN=lambda path: f"https://mp.example/{path}"))
+    plugin = SimpleNamespace(chain=Mock())
+    fields = ({"image": _DATA_URL, "native_image": True} if native_image else
+              {"file_path": str(attachment_path), "file_name": "report.txt"})
+    _PluginBase.post_message(plugin, channel=channel, userid="member", title="说明", text="正文", **fields)
+    message = plugin.chain.post_message.call_args.args[0]
+    module.post_message(message)
+    send.assert_called_once()
+    args, kwargs = send.call_args
+    assert all(callable(kwargs[key]) for key in ("receipt", "part_sender", "plan"))
+    if client_class is WeChat:
+        assert args[0] == (_DATA_URL if native_image else str(attachment_path))
+        assert kwargs["media_type"] == ("image" if native_image else "file")
+        assert kwargs["userid"] == "member"
+    elif client_class is WeChatBot:
+        assert all(kwargs[key] == value for key, value in fields.items())
+        assert kwargs["userid"] == "member"
+    else:
+        assert isinstance(args[0], Message)
+        assert all(getattr(args[0], key) == value for key, value in fields.items())
+        assert args[0].userid == "member"
+    assert message.title == "说明" and message.text == "正文"
+    assert attachment_path.read_text() == "attachment-content"
