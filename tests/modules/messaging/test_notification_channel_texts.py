@@ -11,6 +11,7 @@ from app.application.messaging.channel import platform_for_channel
 from app.modules.dingtalk import DingTalkModule
 from app.modules.discord import DiscordModule
 from app.modules.feishu.feishu import Feishu
+from app.modules.qqbot.api import QQRequestRejected
 from app.modules.qqbot.module import QQBotModule
 from app.modules.qqbot.qqbot import QQBot
 from app.modules.slack import SlackModule
@@ -285,7 +286,7 @@ def test_qq_keeps_rich_text_and_falls_back_original_once(markdown_available):
           patch("app.modules.qqbot.qqbot.get_access_token", return_value="token"),
           patch("app.modules.qqbot.qqbot.send_proactive_c2c_message") as send):
         if not markdown_available:
-            send.side_effect = [RuntimeError("11244 markdown 权限不足"), None]
+            send.side_effect = [QQRequestRejected(403, 11244, "markdown 权限不足"), None]
         assert client.send_msg("签到", text="原有全部站点正文", formatted_texts=parts)
     assert send.call_count == 2
     if markdown_available:

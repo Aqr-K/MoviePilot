@@ -239,36 +239,6 @@ def test_submit_message_to_host_copies_payload_and_reports_admission_failure():
     assert ingress.submit_message_to_host({}, "channel", submit=reject) is False
 
 
-@pytest.mark.parametrize(
-    ("module", "client_type", "source_attr"),
-    [(qqbot_module, qqbot_module.QQBot, '_config_name')],
-)
-def test_threaded_channels_submit_through_managed_executor(
-    monkeypatch,
-    module,
-    client_type,
-    source_attr,
-):
-    """
-    原裸线程渠道必须把回环任务交给共享 ThreadHelper。
-    """
-    calls = []
-    executor = SimpleNamespace(submit=lambda *_args, **_kwargs: None)
-
-    def submit_message(payload, source, *, submit, timeout=15):
-        """
-        记录渠道传给统一提交边界的参数。
-        """
-        calls.append((payload, source, submit, timeout))
-        return True
-
-    monkeypatch.setattr(module, "ThreadHelper", lambda: executor)
-    monkeypatch.setattr(module, "submit_message_to_host", submit_message)
-    client = object.__new__(client_type)
-    setattr(client, source_attr, "channel-main")
-
-    assert client._forward_to_message_chain({"text": "hello"}) is True
-    assert calls == [({"text": "hello"}, "channel-main", executor.submit, 15)]
 
 
 
@@ -291,7 +261,7 @@ def test_message_modules_cannot_reimplement_loopback_endpoint():
 
 @pytest.mark.parametrize(
     "module,client_type,source_attr",
-    [(feishu_module, feishu_module.Feishu, '_name'), (telegram_module, telegram_module.Telegram, '_config_name'), (slack_module, slack_module.Slack, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
+    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name'), (telegram_module, telegram_module.Telegram, '_config_name'), (slack_module, slack_module.Slack, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
 )
 @pytest.mark.parametrize("accepted", [True, False, None])
 def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type, source_attr, accepted):
