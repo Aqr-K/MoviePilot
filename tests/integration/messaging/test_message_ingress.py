@@ -241,7 +241,7 @@ def test_submit_message_to_host_copies_payload_and_reports_admission_failure():
 
 @pytest.mark.parametrize(
     ("module", "client_type", "source_attr"),
-    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name')],
+    [(qqbot_module, qqbot_module.QQBot, '_config_name')],
 )
 def test_threaded_channels_submit_through_managed_executor(
     monkeypatch,
@@ -275,23 +275,6 @@ def test_threaded_channels_submit_through_managed_executor(
 
 
 
-@pytest.mark.asyncio
-async def test_discord_uses_shared_async_ingress(monkeypatch):
-    """
-    Discord 自有事件循环不得继续维护独立 httpx 回环实现。
-    """
-    forward = AsyncMock(return_value=True)
-    monkeypatch.setattr(discord_module, "async_forward_message_to_host", forward)
-    client = object.__new__(discord_module.Discord)
-    client._config_name = "discord-main"
-
-    await client._post_to_ds({"text": "hello"})
-
-    forward.assert_awaited_once_with(
-        {"text": "hello"},
-        "discord-main",
-        timeout=10,
-    )
 
 
 def test_message_modules_cannot_reimplement_loopback_endpoint():
@@ -308,7 +291,7 @@ def test_message_modules_cannot_reimplement_loopback_endpoint():
 
 @pytest.mark.parametrize(
     "module,client_type,source_attr",
-    [(telegram_module, telegram_module.Telegram, '_config_name'), (slack_module, slack_module.Slack, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
+    [(feishu_module, feishu_module.Feishu, '_name'), (telegram_module, telegram_module.Telegram, '_config_name'), (slack_module, slack_module.Slack, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
 )
 @pytest.mark.parametrize("accepted", [True, False, None])
 def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type, source_attr, accepted):
@@ -329,6 +312,26 @@ def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type
     assert client._forward_to_message_chain(payload, **extra) is (accepted is True)
     if bound is not None:
         bound.assert_called_once_with(payload, submit=executor.submit)
+    assert port.sync_calls == [] and port.async_calls == []
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepted", [True, False, None])
+async def test_discord_uses_only_the_bound_ingress(monkeypatch, accepted):
+    """
+    Discord 自有事件循环也只提交绑定任务，失败不能切换为 HTTP。
+    """
+    executor = SimpleNamespace(submit=Mock())
+    monkeypatch.setattr(discord_module, "ThreadHelper", lambda: executor)
+    client = object.__new__(discord_module.Discord)
+    client._config_name = "discord-main"
+    bound = Mock(return_value=accepted) if accepted is not None else None
+    client._message_ingress = bound
+    assert await client._post_to_ds({"text": "hello"}) is (accepted is True)
+    if bound is not None:
+        bound.assert_called_once_with({"text": "hello"}, submit=executor.submit)
+    port = ingress._message_ingress_snapshot()
     assert port.sync_calls == [] and port.async_calls == []
 
 

@@ -71,67 +71,8 @@ def _module(monkeypatch: pytest.MonkeyPatch, channel, module_class, client):
     return module
 
 
-@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] not in {Slack, Telegram, WeChat, WeChatBot, WechatClawBot}])
-def test_same_plugin_image_payload_is_adapted_by_host(
-    monkeypatch: pytest.MonkeyPatch, channel, module_class, client_class,
-) -> None:
-    """
-    插件使用同一组参数，不判断渠道或企微模式，原图、说明及目标均由宿主转交。
-    """
-    client = client_class.__new__(client_class)
-    send_image = Mock(return_value={"success": True})
-    send_msg = Mock(return_value=True)
-    monkeypatch.setattr(client, "send_image", send_image, raising=False)
-    monkeypatch.setattr(client, "send_msg", send_msg, raising=False)
-    module = _module(monkeypatch, channel, module_class, client)
-    monkeypatch.setattr(plugin_base, "settings", SimpleNamespace(MP_DOMAIN=lambda path: f"https://mp.example/{path}"))
-    plugin = SimpleNamespace(chain=Mock())
-    _PluginBase.post_message(
-        plugin, channel=channel, userid="member", title="扫码", text="二维码说明",
-        image=_DATA_URL, native_image=True,
-    )
-    message = plugin.chain.post_message.call_args.args[0]
-
-    module.post_message(message)
-
-    sent = send_msg if client_class in {WeChat, WeChatBot, WechatClawBot} else send_image
-    assert sent.call_count == 1
-    payload = sent.call_args.kwargs
-    assert payload["image"] == _DATA_URL
-    assert payload["title"] == "扫码"
-    assert payload["text"] == "二维码说明"
-    assert payload["userid"] == "member"
-    if sent is send_msg:
-        assert payload["native_image"] is True
-    else:
-        assert "link" not in payload
-    assert message.image == _DATA_URL
-    assert message.native_image is True
 
 
-@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] not in {Slack, Telegram, WeChat, WeChatBot, WechatClawBot}])
-def test_same_plugin_file_payload_preserves_attachment_and_caption(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, channel, module_class, client_class,
-) -> None:
-    """
-    所有已声明文件能力的模块都转交相同附件字段，不再丢弃说明或要求插件识别模式。
-    """
-    path = tmp_path / "source.txt"
-    path.write_text("attachment-content")
-    client = client_class.__new__(client_class)
-    send_file = Mock(return_value={"success": True})
-    monkeypatch.setattr(client, "send_file", send_file)
-    module = _module(monkeypatch, channel, module_class, client)
-
-    module.post_message(Message(channel=channel, userid="member", title="附件", text="请下载",
-                                file_path=str(path), file_name="report.txt"))
-
-    assert send_file.call_count == 1
-    payload = send_file.call_args.kwargs
-    assert {key: payload[key] for key in ("file_path", "file_name", "title", "text", "userid")} == {
-        "file_path": str(path), "file_name": "report.txt", "title": "附件", "text": "请下载", "userid": "member",
-    }
-    assert path.read_text() == "attachment-content"
 
 
 @pytest.mark.parametrize("channel,module_class", _LINK_CHANNELS)
@@ -452,7 +393,7 @@ def test_feishu_native_image_broadcast_reports_failures(monkeypatch, tmp_path, f
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("channel,module_class,client_class", [item for item in _UPLOAD_CHANNELS if item[2] in {Slack, Telegram, WeChat, WeChatBot, WechatClawBot}])
+@pytest.mark.parametrize("channel,module_class,client_class", _UPLOAD_CHANNELS)
 @pytest.mark.parametrize("native_image", [True, False])
 def test_same_plugin_media_payload_reaches_tracked_delivery(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, channel, module_class, client_class, native_image,

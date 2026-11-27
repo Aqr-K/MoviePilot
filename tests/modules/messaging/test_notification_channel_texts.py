@@ -423,3 +423,30 @@ def test_host_telegram_native_conversion_preserves_literal_content():
     assert "&lt;!channel&gt;" in converted
     assert '<a href="https://bad.example"' not in converted
     assert "<h2>站点自动签到</h2>" in converted
+
+
+@pytest.mark.parametrize("with_rich_text", [False, True])
+def test_feishu_splits_oversized_paragraph_within_card_budget(with_rich_text):
+    """
+    单个中文段落也需要拆分，附件封面和链接不挤占分页预留。
+    """
+    import json
+
+    client = object.__new__(Feishu)
+    text = '中文正文"内容"' * 2300
+    message = _message()
+    message.text = text
+    message.link = "https://example.com/details"
+    message.rich_content = NotificationContent(blocks=[NotificationBlock(text=text)]) if with_rich_text else None
+    cards = client._build_notification_cards(message, "fixture-cover")
+
+    assert len(cards) > 1
+    body = []
+    for card in cards:
+        assert len(json.dumps(card, ensure_ascii=False).encode("utf-8")) <= client._NOTIFICATION_CARD_BYTES
+        assert card["body"]["elements"][0]["img_key"] == "fixture-cover"
+        body_text = card["body"]["elements"][2]["content"]
+        text_part, link = body_text.split("\n\n[查看详情]")
+        assert link == "(https://example.com/details)"
+        body.append(text_part)
+    assert "".join(body) == text

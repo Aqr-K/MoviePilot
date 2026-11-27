@@ -123,8 +123,8 @@ FROZEN_EGRESS_FINGERPRINT_BY_EDGE = {
     ("app.cli", "urllib.request"): "71b3e5be2a7d85fdc7a207d15c0e690d7ab96b335b882a3eaec03a1cb4ec1d1b",
     ("app.doctor.checks", "socket.create_connection"): "dfb34d4710353029dcc06e0e0ce3b299bae1a7e71a5743de1d253ac26380f9b6",
     ("app.doctor.checks", "urllib.request"): "d8dd2279263ef58c3b4c59c70451533a4fc27d2ccd76960ca3aff29cd73f3354",
-    # 删除用户历史频道回落的get_channel/fetch_channel各一次；未新增网络能力或其它SDK调用。
-    ("app.modules.discord.discord", "discord"): "2761ef9a9e5a805bfb20ea832c5d34edea12db21ca3eb27c3db7ce512a5ee7f5",
+    # 仅通知模式通过同一 SDK 登录 REST，受管附件复用该 SDK 的文件对象。
+    ("app.modules.discord.discord", "discord"): "5088f05246c869de00b5b05d11b387bf08d528aca2a4b62c975000faff047bae",
     ("app.modules.emby.emby", "requests"): "6c4c17fe170226ea1272f5859bc119c2775442cabe8ce2a9edcabaf9c37bec31",
     ("app.adapters.network.feishu", "websocket"): "95aca65eed288e0c7654ab49aad6c535d9313d5e38c44b1cb1768dcdfc772453",
     # SMB 原有读写经同一 owner 的故障包装器调用；新增 delete_session 仅移除失效主机缓存。
