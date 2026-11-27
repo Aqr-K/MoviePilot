@@ -951,8 +951,8 @@
       "runtime_only": true
     }
   },
-  "edge_count": 11037,
-  "edge_sha256": "6b3b023fdfc73a101ae889f14e5ca8e3194b359d8556ecd757b18eaf47e06f0a",
+  "edge_count": 11042,
+  "edge_sha256": "b6c9bb638754411fb36fbe057d3ea0593413095f48db4f603b5f544e92368698",
   "edges": [
     "app -> app.foundation",
     "app -> app.foundation.environment",
@@ -9927,6 +9927,7 @@
     "app.modules.wechatclawbot -> app.application.messaging",
     "app.modules.wechatclawbot -> app.application.messaging.channel",
     "app.modules.wechatclawbot -> app.application.messaging.channel.admin",
+    "app.modules.wechatclawbot -> app.application.messaging.delivery",
     "app.modules.wechatclawbot -> app.application.messaging.ingress",
     "app.modules.wechatclawbot -> app.domain",
     "app.modules.wechatclawbot -> app.domain.context",
@@ -9968,6 +9969,10 @@
     "app.modules.wechatclawbot.wechatclawbot -> app.runtime.cache",
     "app.modules.wechatclawbot.wechatclawbot -> app.runtime.log",
     "app.modules.wechatclawbot.wechatclawbot -> app.runtime.settings",
+    "app.modules.wechatclawbot.wechatclawbot -> app.runtime.thread",
+    "app.modules.wechatclawbot.wechatclawbot -> app.schemas",
+    "app.modules.wechatclawbot.wechatclawbot -> app.schemas.delivery",
+    "app.modules.wechatclawbot.wechatclawbot -> app.schemas.message",
     "app.modules.zspace -> app.modules",
     "app.modules.zspace -> app.modules._base",
     "app.modules.zspace -> app.modules._base.mediaserver",

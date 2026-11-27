@@ -3,12 +3,17 @@
 """
 
 import json
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from app.application.messaging.channel.admin import (
     matches_channel_admin,
     register_channel_admin_resolver,
     resolve_config_principal_ids,
+)
+from app.application.messaging.delivery import (
+    NotificationParts,
+    notification_preflight_active,
 )
 from app.application.messaging.ingress import bind_platform_payload as _bind_platform_payload
 from app.domain.context import Context, MediaInfo
@@ -183,7 +188,6 @@ class WechatClawBotModule(_MessageChannelModuleBase[WechatClawBot]):
             if temporary:
                 client.stop()
 
-
     @staticmethod
     def _manage_client(client: WechatClawBot, action: NotificationAction, params: dict[str, Any]) -> dict[str, Any]:
         """
@@ -268,7 +272,7 @@ class WechatClawBotModule(_MessageChannelModuleBase[WechatClawBot]):
             "name": config.id, "auto_start_polling": False,
         })), None, True
 
-    def _build_temp_client(self, params: Dict[str, Any]) -> Optional[Any]:
+    def _build_temp_client(self, params: Dict[str, Any]) -> WechatClawBot | None:
         """
         基于表单参数创建临时客户端，用于未保存配置时的扫码状态预览。
         """
@@ -460,44 +464,60 @@ class WechatClawBotModule(_MessageChannelModuleBase[WechatClawBot]):
             files=files,
         )
 
-    def post_message(self, message: Message, **kwargs: object) -> None:
+    def post_message(self, message: Message, **kwargs: object) -> Optional[bool]:
         """
         向符合通知规则的实例发送附件、语音文件或普通通知。
 
         :param message: 通知内容与接收目标；普通文件优先，其次把语音作为文件发送
         :param kwargs: 兼容模块分发的附加参数，当前不使用
+        :return: 强制私聊实际发送并确认后返回 True；普通通知或平台不匹配返回 None
         """
+        message = self.prepare_message(message)
         for conf, message in self.iter_message_configs(message):
             userid = self.get_notification_userid(
                 message, "wechatclawbot_userid"
             )
-            client: Optional[WechatClawBot] = self.get_instance(conf.name)
+            client: Optional[WechatClawBot] = self.get_message_client(conf.name, message)
             if not client:
+                self.record_delivery(message, conf, None, target=userid, status="retryable_failure", code="client_unavailable")
+                continue
+            if isinstance(client, WechatClawBot):
+                parts = NotificationParts(NotificationChannel.WechatClawBot, conf.id, conf.identity_namespace, part_offset=message.attachment_part_offset)
+                self.confirm_private_delivery(message, client.send_tracked_notification(
+                    message, userid, receipt=partial(parts.record, message), part_sender=parts.send, plan=parts.plan,
+                ))
+                if message.private_delivery and message.attachment_part_final:
+                    return True
+                continue
+            if notification_preflight_active():
                 continue
             if message.file_path:
-                client.send_file(
+                self.record_delivery(message, conf, client.send_file(
                     file_path=message.file_path,
                     file_name=message.file_name,
                     title=message.title,
                     text=message.text,
                     userid=userid,
-                )
+                ))
             elif message.voice_path:
-                client.send_file(
+                self.record_delivery(message, conf, client.send_file(
                     file_path=message.voice_path,
                     title=message.voice_caption or message.title,
                     text=message.text,
                     userid=userid,
-                )
+                ))
             else:
-                client.send_msg(
+                self.record_delivery(message, conf, client.send_msg(
                     title=message.title or "",
                     text=message.text,
                     image=message.image,
                     userid=userid,
                     link=message.link,
-                    native_image=message.native_image,
-                )
+                    **({"native_image": True} if message.native_image else {}),
+                ))
+            if message.private_delivery and message.attachment_part_final:
+                return True
+        return None
 
     def download_wechat_image_to_data_url(
         self, image_ref: str, source: str
@@ -546,17 +566,18 @@ class WechatClawBotModule(_MessageChannelModuleBase[WechatClawBot]):
         :param message: 通知路由条件和接收目标
         :param medias: 按输入顺序展示的媒体候选项
         """
+        message = self.prepare_message(message)
         for conf in self.get_configs().values():
             if not self.check_message(message, conf.name):
                 continue
-            client: Optional[WechatClawBot] = self.get_instance(conf.name)
+            client: Optional[WechatClawBot] = self.get_message_client(conf.name, message)
             if client:
-                client.send_medias_msg(
+                self.record_delivery(message, conf, client.send_medias_msg(
                     medias=medias,
                     userid=self.get_notification_userid(
                         message, "wechatclawbot_userid"
                     ),
-                )
+                ))
 
     def post_torrents_message(self, message: Message, torrents: List[Context]) -> None:
         """
@@ -565,16 +586,17 @@ class WechatClawBotModule(_MessageChannelModuleBase[WechatClawBot]):
         :param message: 通知路由条件、标题、链接和接收目标
         :param torrents: 含种子和媒体信息的候选上下文
         """
+        message = self.prepare_message(message)
         for conf in self.get_configs().values():
             if not self.check_message(message, conf.name):
                 continue
-            client: Optional[WechatClawBot] = self.get_instance(conf.name)
+            client: Optional[WechatClawBot] = self.get_message_client(conf.name, message)
             if client:
-                client.send_torrents_msg(
+                self.record_delivery(message, conf, client.send_torrents_msg(
                     torrents=torrents,
                     userid=self.get_notification_userid(
                         message, "wechatclawbot_userid"
                     ),
                     title=message.title,
                     link=message.link,
-                )
+                ))

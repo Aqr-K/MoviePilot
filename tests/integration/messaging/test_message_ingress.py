@@ -271,26 +271,6 @@ def test_threaded_channels_submit_through_managed_executor(
     assert calls == [({"text": "hello"}, "channel-main", executor.submit, 15)]
 
 
-@pytest.mark.parametrize(
-    ("module", "client_type", "source_attr"),
-    [(clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
-)
-def test_sync_channels_forward_through_shared_ingress(
-    monkeypatch,
-    module,
-    client_type,
-    source_attr,
-):
-    """
-    同步轮询渠道必须复用统一回环请求和确认语义。
-    """
-    forward = MagicMock(return_value=True)
-    monkeypatch.setattr(module, "forward_message_to_host", forward)
-    client = object.__new__(client_type)
-    setattr(client, source_attr, "channel-main")
-
-    assert client._forward_to_message_chain({"text": "hello"}) is True
-    forward.assert_called_once_with({"text": "hello"}, "channel-main")
 
 
 def test_slack_preserves_callback_timeout_through_shared_ingress(monkeypatch):
@@ -343,7 +323,7 @@ def test_message_modules_cannot_reimplement_loopback_endpoint():
 
 @pytest.mark.parametrize(
     "module,client_type,source_attr",
-    [(telegram_module, telegram_module.Telegram, '_config_name')],
+    [(telegram_module, telegram_module.Telegram, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
 )
 @pytest.mark.parametrize("accepted", [True, False, None])
 def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type, source_attr, accepted):
