@@ -145,7 +145,7 @@ FROZEN_EGRESS_FINGERPRINT_BY_EDGE = {
     ("app.modules.rtorrent.rtorrent", "xmlrpc.client.ServerProxy"): "2ac64b5670c930bc28bb2135cc4b73891c1cae01a74a9586f74e302878c45c85",
     # Slack 客户端守卫和返回类型收紧后，扫描器保留了完整调用面；传输边界未增加。
     ("app.modules.slack.slack", "slack_bolt"): "d970999c7c77ca5e93ec8a2773fa0b3db10df63ecce780b5fd52ca038734666a",
-    # 受管发送复用无自动重试的 WebClient，检查 SDK 响应和异常。
+    # 受管发送使用无自动重试的 WebClient，直接检查 SDK 响应和异常。
     ("app.modules.slack.slack", "slack_sdk"): "dcddba8ce09bfdae7f56f6e0b2de30d72478e606ee5d7c097ae1b3894042dc7c",
     # Session 类型使扫描器识别原有的两处 close；未新增发送或会话关闭路径。
     ("app.modules.themoviedb.tmdbv3api.tmdb", "requests"): "6c4ea48dd83616375a48785f9de9f477268f9236029e57b17ca1d2bde538fd4c",
