@@ -951,8 +951,8 @@
       "runtime_only": true
     }
   },
-  "edge_count": 10881,
-  "edge_sha256": "b36e8f06220f204e174600725629709f1e808b86182c8c185ea8ae6bd3c54137",
+  "edge_count": 10885,
+  "edge_sha256": "38ab5a944f1851d2b7dfa39d1c21c493944fbcf952a0316f91c3dbd340371d94",
   "edges": [
     "app -> app.foundation",
     "app -> app.foundation.environment",
@@ -5210,6 +5210,8 @@
     "app.chain.download.submission -> app.application.directory",
     "app.chain.download.submission -> app.application.download",
     "app.chain.download.submission -> app.application.download.admission",
+    "app.chain.download.submission -> app.application.download.tasks",
+    "app.chain.download.submission -> app.application.history",
     "app.chain.download.submission -> app.application.site",
     "app.chain.download.submission -> app.application.site.protocol",
     "app.chain.download.submission -> app.application.site.throttle",
@@ -5235,6 +5237,7 @@
     "app.chain.download.submission -> app.runtime.events",
     "app.chain.download.submission -> app.runtime.locks",
     "app.chain.download.submission -> app.runtime.log",
+    "app.chain.download.submission -> app.runtime.settings",
     "app.chain.download.submission -> app.schemas",
     "app.chain.download.submission -> app.schemas.common",
     "app.chain.download.submission -> app.schemas.download",
@@ -6168,6 +6171,7 @@
     "app.chain.subscribe.policy -> app.application.download",
     "app.chain.subscribe.policy -> app.application.download.admission",
     "app.chain.subscribe.policy -> app.application.download.pending",
+    "app.chain.subscribe.policy -> app.application.history",
     "app.chain.subscribe.policy -> app.application.subscription",
     "app.chain.subscribe.policy -> app.application.subscription.activity",
     "app.chain.subscribe.policy -> app.application.subscription.contract",
