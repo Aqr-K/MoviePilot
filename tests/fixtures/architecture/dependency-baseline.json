@@ -790,14 +790,29 @@
       },
       {
         "bindings": [
-          "from:slack_sdk.WebClient as WebClient"
+          "from:slack_sdk.WebClient as WebClient",
+          "from:slack_sdk.errors.SlackApiError as SlackApiError",
+          "from:slack_sdk.errors.SlackRequestError as SlackRequestError",
+          "from:slack_sdk.web.slack_response.SlackResponse as SlackResponse"
         ],
-        "fingerprint": "7559f31e4172ad3bbbaf161e1164ea48b997c56d05c77b49b82626298c39aa14",
+        "fingerprint": "dcddba8ce09bfdae7f56f6e0b2de30d72478e606ee5d7c097ae1b3894042dc7c",
         "kind": "network_sdk",
         "source": "app.modules.slack.slack",
         "target": "slack_sdk",
         "uses": [
-          "Slack.__init__|call:WebClient"
+          "Slack.__find_public_channel|call:conversations_list",
+          "Slack.__init__|call:WebClient",
+          "Slack.__init__|call:WebClient",
+          "Slack.add_reaction|call:reactions_add",
+          "Slack.delete_msg|call:chat_delete",
+          "Slack.remove_reaction|call:reactions_remove",
+          "Slack.send_file|call:files_upload_v2",
+          "Slack.send_medias_msg|call:chat_postMessage",
+          "Slack.send_medias_msg|call:chat_update",
+          "Slack.send_msg|call:chat_postMessage",
+          "Slack.send_msg|call:chat_update",
+          "Slack.send_torrents_msg|call:chat_postMessage",
+          "Slack.send_torrents_msg|call:chat_update"
         ]
       },
       {
@@ -951,8 +966,8 @@
       "runtime_only": true
     }
   },
-  "edge_count": 11042,
-  "edge_sha256": "b6c9bb638754411fb36fbe057d3ea0593413095f48db4f603b5f544e92368698",
+  "edge_count": 11049,
+  "edge_sha256": "2d91afbd9cb05035d797cbcdd2451af565be42c77d328ddce18c4cccd4eec8d0",
   "edges": [
     "app -> app.foundation",
     "app -> app.foundation.environment",
@@ -9257,6 +9272,7 @@
     "app.modules.slack -> app.application.messaging",
     "app.modules.slack -> app.application.messaging.channel",
     "app.modules.slack -> app.application.messaging.channel.admin",
+    "app.modules.slack -> app.application.messaging.delivery",
     "app.modules.slack -> app.domain",
     "app.modules.slack -> app.domain.context",
     "app.modules.slack -> app.modules",
@@ -9268,6 +9284,7 @@
     "app.modules.slack -> app.schemas",
     "app.modules.slack -> app.schemas.event",
     "app.modules.slack -> app.schemas.message",
+    "app.modules.slack -> app.schemas.system",
     "app.modules.slack -> app.schemas.types",
     "app.modules.slack.channel -> app.modules",
     "app.modules.slack.channel -> app.modules._base",
@@ -9293,6 +9310,11 @@
     "app.modules.slack.slack -> app.runtime",
     "app.modules.slack.slack -> app.runtime.log",
     "app.modules.slack.slack -> app.runtime.settings",
+    "app.modules.slack.slack -> app.runtime.thread",
+    "app.modules.slack.slack -> app.schemas",
+    "app.modules.slack.slack -> app.schemas.delivery",
+    "app.modules.slack.slack -> app.schemas.message",
+    "app.modules.slack.slack -> app.schemas.types",
     "app.modules.subtitle -> app.adapters",
     "app.modules.subtitle -> app.adapters.network",
     "app.modules.subtitle -> app.adapters.network.http",

@@ -273,21 +273,6 @@ def test_threaded_channels_submit_through_managed_executor(
 
 
 
-def test_slack_preserves_callback_timeout_through_shared_ingress(monkeypatch):
-    """
-    Slack action 的历史长超时必须继续传给统一入口。
-    """
-    forward = MagicMock(return_value=True)
-    monkeypatch.setattr(slack_module, "forward_message_to_host", forward)
-    client = object.__new__(slack_module.Slack)
-    client._config_name = "slack-main"
-
-    assert client._forward_to_message_chain({"action": "run"}, timeout=60) is True
-    forward.assert_called_once_with(
-        {"action": "run"},
-        "slack-main",
-        timeout=60,
-    )
 
 
 @pytest.mark.asyncio
@@ -323,7 +308,7 @@ def test_message_modules_cannot_reimplement_loopback_endpoint():
 
 @pytest.mark.parametrize(
     "module,client_type,source_attr",
-    [(telegram_module, telegram_module.Telegram, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
+    [(telegram_module, telegram_module.Telegram, '_config_name'), (slack_module, slack_module.Slack, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
 )
 @pytest.mark.parametrize("accepted", [True, False, None])
 def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type, source_attr, accepted):
