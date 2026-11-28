@@ -240,7 +240,12 @@ def test_bot_receives_same_file_request_as_application(
     _module(monkeypatch, bot).post_message(Message(file_path=str(attachment), title="附件", userid="member-1"))
 
     send.assert_not_called()
-    send_file.assert_called_once_with(file_path=str(attachment), file_name=None, title="附件", text=None, userid="member-1")
+    send_file.assert_called_once()
+    kwargs = send_file.call_args.kwargs
+    assert {key: kwargs[key] for key in ("file_path", "file_name", "title", "text", "userid")} == {
+        "file_path": str(attachment), "file_name": None, "title": "附件", "text": None, "userid": "member-1",
+    }
+    assert all(callable(kwargs[key]) for key in ("receipt", "part_sender", "plan"))
 
 
 @pytest.mark.parametrize("channel", [NotificationChannel.Wechat, NotificationChannel.Telegram,
