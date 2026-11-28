@@ -17,6 +17,7 @@ from app.modules.wechat.wechat import WeChat
 from app.modules.wechat.wechatbot import WeChatBot
 from app.schemas.message import Message
 from app.schemas.notification import ChannelCapability, ChannelCapabilityManager
+from app.schemas.system import NotificationConf
 from app.schemas.types import NotificationChannel
 from app.sdk.plugin import base as plugin_base
 from app.sdk.plugin.base import _PluginBase
@@ -180,7 +181,7 @@ def _module(monkeypatch: pytest.MonkeyPatch, client: WeChat | WeChatBot) -> Wech
     """
     module = WechatModule()
     module._channel = NotificationChannel.Wechat
-    conf = SimpleNamespace(name="wechat-test", config={})
+    conf = NotificationConf(id="wechat-test", name="wechat-test", type="wechat", config={})
     monkeypatch.setattr(module, "get_configs", lambda: {conf.name: conf})
     monkeypatch.setattr(module, "get_instance", lambda _: client)
     return module
