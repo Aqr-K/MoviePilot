@@ -137,6 +137,22 @@ def test_structured_sensitive_settings_preserve_non_secret_match_fields() -> Non
     assert redacted[0]["config"]["token"] == "***"
 
 
+@pytest.mark.parametrize("key,mode", [
+    (SystemConfigKey.Notifications, "dedicated_operation"),
+    (SystemConfigKey.ChannelSettings, "internal_state"),
+    (SystemConfigKey.MediaServerUserCredentials, "internal_state"),
+])
+def test_channel_and_media_credentials_keep_dedicated_write_boundaries(key, mode) -> None:
+    """
+    同步上游媒体凭据合同后，旧通知和新渠道资源仍不能通过通用设置入口改写。
+    """
+    spec = ALL_SETTING_SPECS[key.value]
+    assert spec.apply_mode == mode
+    assert spec.generic_write_allowed is False
+    assert spec.update_operations == ()
+    assert spec.sensitive is True
+
+
 @pytest.mark.asyncio
 async def test_settings_update_rejects_managed_and_internal_generic_writes(monkeypatch) -> None:
     """
@@ -158,6 +174,8 @@ async def test_settings_update_rejects_managed_and_internal_generic_writes(monke
             setting_key=SystemConfigKey.AIAgentConfig.value,
             value={},
         )
+    with pytest.raises(ValueError, match="系统设置项 .*不存在"):
+        await service.update(setting_key="UnregisteredChannelSetting", value=True)
     runtime.update.assert_not_called()
     system.async_set_with_normalized_value.assert_not_called()
 
@@ -279,3 +297,25 @@ def test_system_settings_catalog_matches_source_declarations() -> None:
     assert catalog_generator.OUTPUT_PATH.read_text(encoding="utf-8") == catalog_generator.render_catalog(), (
         "请运行 python scripts/generate_system_settings_catalog.py 重新生成系统设置来源目录"
     )
+
+
+def test_missing_notification_user_policy_contract_and_legacy_default(monkeypatch):
+    """
+    系统设置合同保存独立回退策略，旧配置默认管理员，不接受未知策略。
+    """
+    from pydantic import ValidationError
+
+    from app.application import notification
+    from app.schemas.system import NotificationSwitchConf
+    from app.schemas.types import MessageType
+
+    spec = ALL_SETTING_SPECS[SystemConfigKey.NotificationSwitchs.value]
+    assert validate_setting_value(spec, [{"type": "订阅", "action": "user"}])[0].missing_user == "admin"
+    assert validate_setting_value(spec, [{"type": "订阅", "action": "user", "missing_user": "skip"}])[0].missing_user == "skip"
+    with pytest.raises((ValueError, ValidationError)):
+        validate_setting_value(spec, [{"type": "订阅", "action": "user", "missing_user": "broadcast"}])
+    monkeypatch.setattr(notification, "get_service_configs", lambda *_: [NotificationSwitchConf(type="订阅", action="user", missing_user="skip")])
+    assert notification.get_notification_missing_user_policy(MessageType.Subscribe) == "skip"
+    assert notification.get_notification_switch(MessageType.Subscribe) == "user"
+    assert notification.get_notification_missing_user_policy(None) == "admin"
+    assert notification.get_notification_missing_user_policy(MessageType.Download) == "admin"

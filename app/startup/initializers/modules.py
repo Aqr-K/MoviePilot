@@ -5,6 +5,7 @@
 import asyncio
 import inspect
 import sys
+from functools import partial
 from typing import Any, Callable, cast
 
 # SitesHelper涉及资源包拉取，提前引入并容错提示
@@ -15,6 +16,7 @@ except ImportError as e:
     print(error_message, file=sys.stderr)
     sys.exit(1)
 
+import app.application.messaging.channel as channel_platform
 from app.adapters.external.server import MoviePilotServerHelper
 from app.adapters.system.host import SystemUtils
 from app.application.configuration import (
@@ -27,8 +29,18 @@ from app.application.messaging.agent import (
     shutdown_web_agent_background_tasks,
     wait_web_agent_background_tasks,
 )
+from app.application.messaging.channel.catalog import project_runtime_channels
+from app.application.messaging.channel.settings import (
+    configure_connection_identity_probe,
+    configure_connection_reconciler,
+    read_channel_resources,
+)
 from app.application.messaging.chat import (
     get_configured_agent_chat_persistence,
+)
+from app.application.messaging.ingress import (
+    configure_platform_payload_receiver,
+    configure_verified_event_claim,
 )
 from app.application.messaging.message import (
     MessageHelper,
@@ -40,6 +52,7 @@ from app.application.module import (
     configure_module_runtime,
     reset_module_runtime,
 )
+from app.application.notification import configure_inactive_channel_manager
 from app.application.outbox import configure_outbox_dispatcher
 from app.application.plugin.runtime import get_existing_plugin_manager
 from app.application.security.url import close_image_proxy_block_log_coalescer
@@ -66,6 +79,7 @@ from app.runtime.settings import (
 from app.runtime.tasks import TaskRegistry, get_task_registry
 from app.runtime.thread import ThreadHelper
 from app.schemas.category import ClassificationFactValue, ClassificationFieldDefinition
+from app.schemas.channel import ChannelConnection, ChannelConnectionInfo
 from app.schemas.message import Message
 from app.schemas.types import EventType, MessageType, SystemConfigKey
 from app.startup.composition.agent import (
@@ -191,15 +205,96 @@ def _existing_module_manager() -> object | None:
     return getter() if callable(getter) else None
 
 
+def _read_service_config(key: SystemConfigKey) -> Any:
+    """
+    让模块和应用共用活动连接投影，旧通知记录只在切换前提供数据。
+    """
+    config = get_configured_system_config()
+    if key == SystemConfigKey.Notifications:
+        snapshot = config.get(SystemConfigKey.ChannelSettings)
+        if snapshot is not None:
+            return [
+                item.model_dump(mode="json")
+                for item in project_runtime_channels(read_channel_resources(snapshot, None))
+            ]
+    return config.get(key)
+
+
+async def _reconcile_channel_connections(
+    previous: tuple[ChannelConnectionInfo, ...], current: tuple[ChannelConnectionInfo, ...],
+) -> None:
+    """
+    提交后按模块分组编排缓存对账，平台实现拥有具体缓存操作。
+    """
+    for platform in channel_platform.platform_catalog().providers():
+        before = tuple(item for item in previous if item.provider == platform.provider)
+        after = tuple(item for item in current if item.provider == platform.provider)
+        if platform.cache_reconciliation and before != after:
+            await run_in_threadpool_to_completion(platform.reconcile, before, after)
+
+
+async def _probe_channel_identity(connection: ChannelConnection) -> str | None:
+    """
+    在受管线程中执行平台账号诊断。
+
+    :param connection: 待核验连接
+    :return: 已确认的平台账号身份
+    """
+    return await run_in_threadpool_to_completion(_read_channel_identity, connection)
+
+
+def _read_channel_identity(connection: ChannelConnection) -> str | None:
+    """
+    从已支持的平台诊断接口读取机器人身份。
+    """
+    platform = channel_platform.platform_catalog().get(connection.provider)
+    return platform.probe_identity(connection) if platform else None
+
+
+def _manage_inactive_notification(channel: str, action: str, params: dict[str, Any]) -> dict[str, Any] | None:
+    """
+    只编排模块声明的离线管理动作，启动层不解释平台登录协议。
+    """
+    if params.get("saved_connection") is not True:
+        return None
+    connection = next((item for item in ServiceConfigHelper.get_notification_configs()
+                       if item.id == str(params.get("source") or "")), None)
+    if connection is None:
+        return None
+    from app.schemas.types import NotificationChannel
+
+    try:
+        transport = NotificationChannel.__members__.get(channel) or NotificationChannel(channel)
+    except ValueError:
+        return None
+    platform = channel_platform.platform_catalog().get(connection.type or "")
+    if platform is None or platform.channel != transport.value:
+        return None
+    return platform.manage(action, params)
+
+
 def configure_runtime_data_providers() -> None:
     """
     在启动组合层装配模块和配置目录的运行时读取能力。
     """
-    configure_service_config_reader(lambda key: get_configured_system_config().get(key))
+    configure_service_config_reader(_read_service_config)
     configure_module_runtime(
         lambda: cast(ModuleRuntime, ModuleManager()),
         existing=lambda: cast(ModuleRuntime | None, _existing_module_manager()),
     )
+    from app.chain.message import MessageChain
+    from app.db.adapters.authorization import claim_inbound_event
+    from app.db.session import SessionFactory
+
+    configure_verified_event_claim(partial(claim_inbound_event, SessionFactory))
+    configure_platform_payload_receiver(
+        lambda body, source, channel, connection_id, provider, namespace, owner, revision: MessageChain().process_platform_payload(
+            body, source, channel, connection_id, provider, namespace, owner, revision,
+        ),
+    )
+    configure_connection_reconciler(_reconcile_channel_connections)
+    configure_connection_identity_probe(_probe_channel_identity)
+    configure_inactive_channel_manager(_manage_inactive_notification)
     configure_service_directory(
         configs=ServiceConfigHelper.get_configs,
         modules=lambda module_type: list(
@@ -213,6 +308,11 @@ def reset_runtime_data_providers() -> None:
     按发布逆序撤销模块、服务目录和配置读取 Provider。
     """
     reset_service_directory()
+    configure_connection_identity_probe(None)
+    configure_inactive_channel_manager(None)
+    configure_connection_reconciler(None)
+    configure_platform_payload_receiver(None)
+    configure_verified_event_claim(None)
     reset_module_runtime()
     reset_service_config_reader()
 
