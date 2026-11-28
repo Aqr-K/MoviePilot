@@ -161,7 +161,10 @@ async def user_message(
     """
     body = await request.body()
     form = await request.form()
-    args = request.query_params
+    args = dict(request.query_params)
+    channel_token = request.headers.get("X-MoviePilot-Channel-Token")
+    if channel_token:
+        args["channel_token"] = channel_token
     source = args.get("source")
     content_type = request.headers.get("content-type") or ""
     body_text = body.decode("utf-8", errors="replace")
