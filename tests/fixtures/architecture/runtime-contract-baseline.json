@@ -1105,6 +1105,70 @@
           "target_name": "resolve_media_identity"
         }
       },
+      "app.modules.discord.discord": {
+        "async_forward_message_to_host": {
+          "replacement": "app.sdk._legacy.ingress.async_forward_message_to_host",
+          "target_module": "app.application.messaging.ingress",
+          "target_name": "async_forward_message_to_host"
+        }
+      },
+      "app.modules.feishu.feishu": {
+        "submit_message_to_host": {
+          "replacement": "app.sdk._legacy.ingress.submit_message_to_host",
+          "target_module": "app.application.messaging.ingress",
+          "target_name": "submit_message_to_host"
+        }
+      },
+      "app.modules.qqbot.qqbot": {
+        "NotificationChannel": {
+          "replacement": "app.sdk.channel.NotificationChannel",
+          "target_module": "app.schemas.types",
+          "target_name": "NotificationChannel"
+        },
+        "submit_message_to_host": {
+          "replacement": "app.sdk._legacy.ingress.submit_message_to_host",
+          "target_module": "app.application.messaging.ingress",
+          "target_name": "submit_message_to_host"
+        }
+      },
+      "app.modules.slack.slack": {
+        "forward_message_to_host": {
+          "replacement": "app.sdk._legacy.ingress.forward_message_to_host",
+          "target_module": "app.application.messaging.ingress",
+          "target_name": "forward_message_to_host"
+        }
+      },
+      "app.modules.telegram.telegram": {
+        "NotificationChannel": {
+          "replacement": "app.sdk.channel.NotificationChannel",
+          "target_module": "app.schemas.types",
+          "target_name": "NotificationChannel"
+        },
+        "forward_message_to_host": {
+          "replacement": "app.sdk._legacy.ingress.forward_message_to_host",
+          "target_module": "app.application.messaging.ingress",
+          "target_name": "forward_message_to_host"
+        }
+      },
+      "app.modules.wechat.wechatbot": {
+        "submit_message_to_host": {
+          "replacement": "app.sdk._legacy.ingress.submit_message_to_host",
+          "target_module": "app.application.messaging.ingress",
+          "target_name": "submit_message_to_host"
+        }
+      },
+      "app.modules.wechatclawbot.wechatclawbot": {
+        "NotificationChannel": {
+          "replacement": "app.sdk.channel.NotificationChannel",
+          "target_module": "app.schemas.types",
+          "target_name": "NotificationChannel"
+        },
+        "forward_message_to_host": {
+          "replacement": "app.sdk._legacy.ingress.forward_message_to_host",
+          "target_module": "app.application.messaging.ingress",
+          "target_name": "forward_message_to_host"
+        }
+      },
       "app.plugins": {
         "PluginChian": {
           "replacement": "app.sdk.plugin.PluginChain",
