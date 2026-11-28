@@ -1,10 +1,11 @@
 """
-多消息渠道复用统一宿主回环入口的契约测试。
+宿主 SDK 连接绑定入口与显式插件 HTTP 兼容契约。
 """
 
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, Mock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -241,11 +242,7 @@ def test_submit_message_to_host_copies_payload_and_reports_admission_failure():
 
 @pytest.mark.parametrize(
     ("module", "client_type", "source_attr"),
-    [
-        (feishu_module, feishu_module.Feishu, "_name"),
-        (qqbot_module, qqbot_module.QQBot, "_config_name"),
-        (wechat_module, wechat_module.WeChatBot, "_config_name"),
-    ],
+    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name'), (wechat_module, wechat_module.WeChatBot, '_config_name')],
 )
 def test_threaded_channels_submit_through_managed_executor(
     monkeypatch,
@@ -277,10 +274,7 @@ def test_threaded_channels_submit_through_managed_executor(
 
 @pytest.mark.parametrize(
     ("module", "client_type", "source_attr"),
-    [
-        (telegram_module, telegram_module.Telegram, "_config_name"),
-        (clawbot_module, clawbot_module.WechatClawBot, "_config_name"),
-    ],
+    [(clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
 )
 def test_sync_channels_forward_through_shared_ingress(
     monkeypatch,
@@ -346,3 +340,79 @@ def test_message_modules_cannot_reimplement_loopback_endpoint():
             violations.append(path.relative_to(PROJECT_ROOT).as_posix())
 
     assert violations == []
+
+
+@pytest.mark.parametrize(
+    "module,client_type,source_attr",
+    [(telegram_module, telegram_module.Telegram, '_config_name')],
+)
+@pytest.mark.parametrize("accepted", [True, False, None])
+def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type, source_attr, accepted):
+    """
+    已装配、拒绝及身份缺失均只走绑定提交，不调用已保留的插件 HTTP 兼容路径。
+    """
+    executor = SimpleNamespace(submit=Mock())
+    monkeypatch.setattr(module, "ThreadHelper", lambda: executor)
+    client = object.__new__(client_type)
+    setattr(client, source_attr, "channel-main")
+    bound = Mock(return_value=accepted) if accepted is not None else None
+    client._message_ingress = bound
+    if module is clawbot_module:
+        client._stop_event = Event()
+    payload = {"text": "hello"}
+    extra = {"timeout": 60} if module is slack_module else {}
+    port = ingress._message_ingress_snapshot()
+    assert client._forward_to_message_chain(payload, **extra) is (accepted is True)
+    if bound is not None:
+        bound.assert_called_once_with(payload, submit=executor.submit)
+    assert port.sync_calls == [] and port.async_calls == []
+
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "rejected", "stopped", "invalid_payload"])
+def test_platform_payload_submission_preserves_queue_acknowledgement(monkeypatch, outcome):
+    """
+    已认证平台载荷仅在执行器接受后确认；停机或无法序列化时拒绝，保留平台重试机会。
+    """
+    import json
+
+    from app.schemas.types import NotificationChannel
+
+    receiver = Mock()
+    submit = Mock(return_value=outcome == "accepted")
+    if outcome == "stopped":
+        submit.side_effect = RuntimeError("executor stopped")
+    monkeypatch.setattr(ingress, "_platform_payload_receiver", receiver)
+    monkeypatch.setattr("app.application.security.authorization.get_channel_authorization", lambda: object())
+    payload = {"text": object() if outcome == "invalid_payload" else "hello"}
+
+    assert ingress.submit_platform_payload(
+        payload, "fixture", NotificationChannel.Telegram, "connection", submit=submit,
+        provider="telegram", identity_namespace="namespace", parser_owner="TelegramModule", policy_revision=1,
+    ) is (outcome == "accepted")
+    receiver.assert_not_called()
+    if outcome == "invalid_payload":
+        submit.assert_not_called()
+    else:
+        call = submit.call_args.args
+        assert call[0] is ingress._deliver_platform_payload and call[1] is receiver
+        assert json.loads(call[2]) == payload
+        assert call[3:] == ("fixture", NotificationChannel.Telegram, "connection", "telegram", "namespace", "TelegramModule", 1)
+
+
+
+def test_verified_event_claim_fails_closed_when_shared_store_is_unavailable(monkeypatch):
+    """
+    共享认领失败不得回退进程缓存，防止多 worker 重复执行已认证的业务事件。
+    """
+    from app.domain.admission import AdmissionProof
+
+    monkeypatch.setattr(ingress, "time", SimpleNamespace(time=lambda: 100))
+    claim = Mock(side_effect=RuntimeError("shared store unavailable"))
+    monkeypatch.setattr(ingress, "_verified_event_claim", claim)
+    proof = AdmissionProof("connection", 1, "member", "group", 200)
+
+    assert not ingress.claim_verified_event(proof, "event")
+    assert not ingress.claim_verified_event(proof, "event")
+    assert claim.call_count == 2
+    assert claim.call_args.args[1:] == (100, 220)
