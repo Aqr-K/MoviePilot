@@ -10997,6 +10997,73 @@
         "target": "app.chain.base.ChainBase"
       }
     ],
+    "app.sdk.channel": [
+      {
+        "kind": "import",
+        "name": "CHANNEL_EXTENSION_API_VERSION",
+        "target": "app.schemas.channel.CHANNEL_EXTENSION_API_VERSION"
+      },
+      {
+        "kind": "import",
+        "name": "ChannelActor",
+        "target": "app.domain.authorization.ChannelActor"
+      },
+      {
+        "kind": "import",
+        "name": "ChannelConnection",
+        "target": "app.schemas.channel.ChannelConnection"
+      },
+      {
+        "kind": "import",
+        "name": "ChannelConnectionInfo",
+        "target": "app.schemas.channel.ChannelConnectionInfo"
+      },
+      {
+        "kind": "import",
+        "name": "ChannelPlatform",
+        "target": "app.application.messaging.channel.platform.ChannelPlatform"
+      },
+      {
+        "kind": "import",
+        "name": "ChannelPlatformCapabilities",
+        "target": "app.schemas.channel.ChannelPlatformCapabilities"
+      },
+      {
+        "kind": "import",
+        "name": "IncomingMessage",
+        "target": "app.schemas.message.IncomingMessage"
+      },
+      {
+        "kind": "import",
+        "name": "InteractionPolicy",
+        "target": "app.schemas.channel.InteractionPolicy"
+      },
+      {
+        "kind": "import",
+        "name": "Message",
+        "target": "app.schemas.message.Message"
+      },
+      {
+        "kind": "import",
+        "name": "MessageAttachmentRead",
+        "target": "app.schemas.message.MessageAttachmentRead"
+      },
+      {
+        "kind": "import",
+        "name": "NotificationChannel",
+        "target": "app.schemas.types.NotificationChannel"
+      },
+      {
+        "kind": "import",
+        "name": "NotificationRoute",
+        "target": "app.schemas.channel.NotificationRoute"
+      },
+      {
+        "kind": "import",
+        "name": "NotificationRule",
+        "target": "app.schemas.channel.NotificationRule"
+      }
+    ],
     "app.sdk.classification": [
       {
         "kind": "import",

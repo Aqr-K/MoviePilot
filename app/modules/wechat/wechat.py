@@ -67,6 +67,52 @@ class WeChat:
     # 企业微信临时素材上传地址模板
     _upload_media_url = "cgi-bin/media/upload?access_token={access_token}&type={media_type}"
 
+    @classmethod
+    def probe_app_identity(cls, corp_id: str, app_id: str, secret: str) -> str | None:
+        """
+        使用官方接口验证自建应用密钥是否属于指定企业和应用。
+
+        :param corp_id: 已存在连接的企业标识
+        :param app_id: 已存在连接的应用数字标识
+        :param secret: 待核验的应用密钥
+        :return: 经官方响应确认的企业和应用标识
+        """
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", corp_id) or not re.fullmatch(r"[1-9][0-9]*", app_id) or not secret:
+            return None
+        token_response = cls._read_identity_result("gettoken", {"corpid": corp_id, "corpsecret": secret})
+        token = token_response.get("access_token")
+        if not isinstance(token, str) or not token:
+            return None
+        detail = cls._read_identity_result("agent/get", {"access_token": token, "agentid": app_id})
+        returned_id = detail.get("agentid")
+        return f"{corp_id}:{app_id}" if type(returned_id) in (int, str) and str(returned_id) == app_id else None
+
+
+    @staticmethod
+    def _read_identity_result(method: str, params: dict[str, str]) -> dict[str, Any]:
+        """
+        从平台固定地址读取身份凭证，不跟随跳转或输出平台原始响应。
+
+        :param method: 受支持的企业微信身份 API 相对路径
+        :param params: 调用官方接口所需的查询参数
+        :return: 明确成功的对象响应
+        """
+        response = RequestUtils(verify=True, timeout=8).get_res(
+            f"https://qyapi.weixin.qq.com/cgi-bin/{method}", params=params, allow_redirects=False,
+        )
+        if response is None:
+            return {}
+        try:
+            payload = response.json() if response.status_code == 200 else None
+        except ValueError:
+            return {}
+        finally:
+            response.close()
+        if not isinstance(payload, dict) or type(payload.get("errcode")) is not int or payload["errcode"] != 0:
+            return {}
+        return payload
+
+
     def __init__(self, WECHAT_CORPID: Optional[str] = None, WECHAT_APP_SECRET: Optional[str] = None,
                  WECHAT_APP_ID: Optional[str] = None, WECHAT_PROXY: Optional[str] = None,
                  **kwargs: object) -> None:

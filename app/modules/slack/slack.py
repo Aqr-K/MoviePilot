@@ -41,6 +41,38 @@ class Slack:
     # 从单消息 50 块上限中预留标题等结构所需空间。
     _FORMATTED_BLOCK_LIMIT = 48
 
+    @staticmethod
+    def probe_workspace_identity(token: str) -> str | None:
+        """
+        从 Slack 官方接口确认令牌所属的工作区及机器人。
+
+        :param token: 待核验的机器人 OAuth 访问令牌
+        :return: 官方明确返回的工作区与机器人标识
+        """
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", token):
+            return None
+        response = RequestUtils(verify=True, timeout=8, headers={
+            "Authorization": f"Bearer {token}",
+        }).post_res("https://slack.com/api/auth.test", allow_redirects=False)
+        if response is None:
+            return None
+        try:
+            payload = response.json() if response.status_code == 200 else None
+        except ValueError:
+            return None
+        finally:
+            response.close()
+        if not isinstance(payload, dict) or payload.get("ok") is not True or payload.get("is_enterprise_install") is True:
+            return None
+        workspace = payload.get("team_id")
+        bot = payload.get("bot_id")
+        if isinstance(workspace, str) and re.fullmatch(r"T[A-Z0-9]+", workspace) and (
+            isinstance(bot, str) and re.fullmatch(r"B[A-Z0-9]+", bot)
+        ):
+            return f"{workspace}:{bot}"
+        return None
+
+
     def __init__(self, SLACK_OAUTH_TOKEN: Optional[str] = None, SLACK_APP_TOKEN: Optional[str] = None,
                  SLACK_CHANNEL: Optional[str] = None,
                  SLACK_APP_ID: Optional[str] = None,
