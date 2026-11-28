@@ -67,6 +67,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
+      - name: Check channel platform boundaries
+        run: uv run --locked --no-sync python scripts/architecture/channel_platforms.py
+
       - name: Check test ownership and shared fixtures
         if: github.event_name == 'pull_request'
         shell: bash

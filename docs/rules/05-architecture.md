@@ -67,6 +67,13 @@ Entrypoints (app/api, app/command, app/monitor, app/scheduler, app/agent, app/wo
 7. Concrete cache, network, browser, web transport, observability, OS/process, filesystem or Rust bridge I/O -> matching technical package under `app/adapters` (`external/` for named third-party ecosystems)
 8. Public plugin contract or legacy import preservation -> curate in `app/sdk` or map lazily in `app/runtime/compat/manifest.py`
 
+Browser subscription ownership belongs to `app/application/webpush.py`, with
+table access in `app/db/oper/webpush.py`, short transactions in
+`app/db/adapters/webpush.py`, and explicit composition in
+`app/startup/composition/webpush.py`. `app/runtime/webpush.py` retains only the
+ownerless legacy process ABI; canonical personal and management delivery must
+not read it or infer persistent owners from it.
+
 ### Naming and Package Root Discipline
 
 - Do not create generic `common`, `helper` or `utils` buckets, and never recreate
@@ -92,6 +99,14 @@ Entrypoints (app/api, app/command, app/monitor, app/scheduler, app/agent, app/wo
 ## Existing Chain, Module and DB Layers
 
 ### Chain and Scheduler Layer
+
+- Legacy interactive commands that cannot yet accept a separate reply address
+  use the bounded reply scope owned by `app/application/messaging/message.py`.
+  Message and media ingress bind the trusted channel, source, actual actor and
+  conversation; rendering freezes the address before persistence. This scope
+  never authorizes a user, never rewrites explicit/private targets, and never
+  follows a user's most recent conversation. New contracts should carry an
+  explicit address; compatibility scopes must not become a second identity store.
 
 - Runtime shutdown state is owned by `StopState` in `app/runtime/stop.py`
   (`global_vars` stop properties on `app/runtime/config.py` remain a legacy
@@ -313,3 +328,10 @@ Event producer and consumer facts are collected solely by
 
 Run `tests/contracts/architecture/test_architecture_dependencies.py` after any ownership, package-root
 or import change.
+
+消息渠道公共应用包拥有用例、事务/revision、通用规则匹配、受众、时间和 Outbox。其包端口描述模块事实；平台身份解析、凭据、地址校验/编码、专属配置、诊断、缓存与特殊分段由 `app/modules/<provider>/channel.py` 及既有客户端实现。`CapabilityRegistry` 的清单扩展只提供事实，不授予权限。仓储接收规范身份，启动层只编排生命周期。历史升级使用固定离线 `database/legacy` 格式，不调用运行目录或网络。职责表、调用链及可执行约束见[平台边界](../channel-refactor/platform-boundaries.md)。
+
+消息传输类型可以使用 `platform:<id>` 独立扩展；provider 负责协议，连接 ID/namespace 负责归属，私有入口证明负责认证事实。宿主网页类型不能被外部模块用于跳过授权。已认证 SDK 解析必须固定清单中的宿主模块，不能通过全局 parser 或插件猜测 owner。平台格式约束与统一安全政策详见[边界补齐](../channel-refactor/platform-boundaries-completion.md)。
+
+
+渠道公共类型契约由 `app.sdk.channel` v1 精确重导出现有 Protocol/模型；canonical 宿主不反向导入 SDK。可信绑定、私有证明、接收器注入及运行装配不得进入普通插件 SDK。宿主 SDK 入口禁止回退旧 HTTP helper；旧导入仅由兼容清单指向唯一显式 HTTP 实现。`channel_platforms.py` 同时约束这两条边界；注册版本声明不赋予宿主身份或成员权限。接入清单、v1 承诺及兼容退出条件见[SDK 边界](../channel-refactor/sdk-boundaries.md)。
