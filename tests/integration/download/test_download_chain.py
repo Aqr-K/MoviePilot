@@ -21,7 +21,7 @@ from app.application.download.failures import (
     DownloadFailureSnapshot,
     DownloadFailureWrite,
 )
-from app.application.history import DownloadHistorySnapshot
+from app.application.history import DownloadHistorySnapshot, get_download_owner, scoped_download_owner
 from app.chain.download import DownloadChain
 from app.domain.context import Context, MediaInfo, SubtitleInfo, TorrentInfo
 from app.domain.metainfo import MetaInfo
@@ -196,7 +196,7 @@ def test_download_single_submits_download_added_to_background(monkeypatch):
     monkeypatch.setattr(download_submission, "TorrentHelper", _FakeTorrentHelper)
 
     chain = DownloadChain.__new__(DownloadChain)
-    chain.download_history_repository = _FakeDownloadHistoryOper()
+    chain.download_history_repository = MagicMock(spec=_FakeDownloadHistoryOper)
     chain.download = MagicMock(return_value=("qb", "hash123", "Original", "添加下载成功"))
     chain.download_added = MagicMock()
     chain.download_site_subtitles = MagicMock()
@@ -221,14 +221,20 @@ def test_download_single_submits_download_added_to_background(monkeypatch):
         ),
     )
 
-    result = chain.download_single(
-        context=context,
-        torrent_content=b"torrent-content",
-        save_path="/downloads",
-        username="tester",
-    )
+    with scoped_download_owner("a" * 32):
+        result = chain.download_single(
+            context=context,
+            torrent_content=b"torrent-content",
+            save_path="/downloads",
+            username="tester",
+        )
+        assert get_download_owner() == "a" * 32
 
     assert result == "hash123"
+    history, _ = chain.download_history_repository.add.call_args.args
+    assert history.owner_identity == "a" * 32
+    assert history.task_reference in chain.download.call_args.kwargs["label"].split(",")
+    assert get_download_owner() is None
     chain.download_added.assert_not_called()
     assert len(_FakeThreadHelper.submitted) == 1
 
@@ -2382,3 +2388,56 @@ def test_execute_download_single_passes_parsed_hashes_through_resource_submit_wh
     assert seen_submit[0].downloader == "qb-explicit"
     assert seen_submit[0].user_specified is True
     assert submitted.call_args.kwargs["task_hashes"] == frozenset({torrent_hash})
+
+
+def test_resource_submit_revocation_rechecks_authorization_without_leaking_owner(monkeypatch):
+    """
+    上游提交事件不能继承本次下载归属；事件处理中撤权后，不再进入提交阶段。
+    """
+    from app.application.download.admission import (
+        DownloadAuthorizationError,
+        get_download_authorization,
+        scoped_download_authorization,
+    )
+    from app.schemas.types import ChainEventType
+
+    chain = DownloadChain.__new__(DownloadChain)
+    submitted = MagicMock()
+    events = []
+    revoked = False
+
+    def authorize():
+        """
+        模拟当前成员在外部事件回调期间被管理员撤权。
+        """
+        if revoked:
+            raise PermissionError("成员已撤权")
+
+    def handle_event(event_type, event_data):
+        """
+        检查事件不继承调用者上下文，并在下载器提交事件中撤销权限。
+        """
+        nonlocal revoked
+        assert get_download_owner() is None
+        assert get_download_authorization() is None
+        events.append(event_type)
+        if event_type == ChainEventType.ResourceSubmit:
+            revoked = True
+        return SimpleNamespace(event_data=event_data)
+
+    monkeypatch.setattr(eventmanager, "send_event", handle_event)
+    monkeypatch.setattr(download_submission, "TorrentHelper", _FakeTorrentHelper)
+    monkeypatch.setattr(chain, "_resolve_media_download_dir", lambda **_: ("local", Path("/downloads/movies"), None))
+    monkeypatch.setattr(chain, "_submit_prepared_download", submitted)
+    context = Context(
+        meta_info=MetaInfo("Demo.Movie.2026.mkv"),
+        media_info=MediaInfo(type=MediaType.MOVIE, title="Demo Movie", tmdb_id=1),
+        torrent_info=TorrentInfo(title="Demo Movie 2026"),
+    )
+    with scoped_download_owner("a" * 32), scoped_download_authorization(authorize):
+        with pytest.raises(DownloadAuthorizationError, match="成员已撤权"):
+            chain.download_single(context=context, torrent_content="magnet:?xt=urn:btih:" + "a" * 40)
+        assert get_download_owner() == "a" * 32
+        assert get_download_authorization() is authorize
+    assert events == [ChainEventType.ResourceDownload, ChainEventType.ResourceSubmit]
+    submitted.assert_not_called()
