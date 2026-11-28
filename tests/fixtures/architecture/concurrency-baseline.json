@@ -470,7 +470,7 @@
   },
   "app/modules/discord/discord.py:app.runtime.execution.run_in_threadpool": {
     "owners": {
-      "Discord._send_file": 1
+      "_is_regular_file_async": 1
     },
     "target": "app.runtime.execution.run_in_threadpool"
   },

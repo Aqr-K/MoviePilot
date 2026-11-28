@@ -11,6 +11,7 @@ from app.application.messaging.channel import platform_for_channel
 from app.modules.dingtalk import DingTalkModule
 from app.modules.discord import DiscordModule
 from app.modules.feishu.feishu import Feishu
+from app.modules.qqbot.api import QQRequestRejected
 from app.modules.qqbot.module import QQBotModule
 from app.modules.qqbot.qqbot import QQBot
 from app.modules.slack import SlackModule
@@ -285,7 +286,7 @@ def test_qq_keeps_rich_text_and_falls_back_original_once(markdown_available):
           patch("app.modules.qqbot.qqbot.get_access_token", return_value="token"),
           patch("app.modules.qqbot.qqbot.send_proactive_c2c_message") as send):
         if not markdown_available:
-            send.side_effect = [RuntimeError("11244 markdown 权限不足"), None]
+            send.side_effect = [QQRequestRejected(403, 11244, "markdown 权限不足"), None]
         assert client.send_msg("签到", text="原有全部站点正文", formatted_texts=parts)
     assert send.call_count == 2
     if markdown_available:
@@ -423,3 +424,30 @@ def test_host_telegram_native_conversion_preserves_literal_content():
     assert "&lt;!channel&gt;" in converted
     assert '<a href="https://bad.example"' not in converted
     assert "<h2>站点自动签到</h2>" in converted
+
+
+@pytest.mark.parametrize("with_rich_text", [False, True])
+def test_feishu_splits_oversized_paragraph_within_card_budget(with_rich_text):
+    """
+    单个中文段落也需要拆分，附件封面和链接不挤占分页预留。
+    """
+    import json
+
+    client = object.__new__(Feishu)
+    text = '中文正文"内容"' * 2300
+    message = _message()
+    message.text = text
+    message.link = "https://example.com/details"
+    message.rich_content = NotificationContent(blocks=[NotificationBlock(text=text)]) if with_rich_text else None
+    cards = client._build_notification_cards(message, "fixture-cover")
+
+    assert len(cards) > 1
+    body = []
+    for card in cards:
+        assert len(json.dumps(card, ensure_ascii=False).encode("utf-8")) <= client._NOTIFICATION_CARD_BYTES
+        assert card["body"]["elements"][0]["img_key"] == "fixture-cover"
+        body_text = card["body"]["elements"][2]["content"]
+        text_part, link = body_text.split("\n\n[查看详情]")
+        assert link == "(https://example.com/details)"
+        body.append(text_part)
+    assert "".join(body) == text

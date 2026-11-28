@@ -92,7 +92,7 @@
       "app/modules/qqbot/gateway.py:run_gateway": 42,
       "app/modules/rtorrent/__init__.py:RtorrentModule.list_torrents": 20,
       "app/modules/slack/__init__.py:SlackModule.message_parser": 16,
-      "app/modules/slack/slack.py:Slack.send_medias_msg": 18,
+      "app/modules/slack/slack.py:Slack.send_medias_msg": 17,
       "app/modules/transmission/__init__.py:TransmissionModule.list_torrents": 22,
       "app/modules/trimemedia/api.py:Api.request": 16,
       "app/modules/wechat/__init__.py:WechatModule.message_parser": 20,

@@ -239,74 +239,12 @@ def test_submit_message_to_host_copies_payload_and_reports_admission_failure():
     assert ingress.submit_message_to_host({}, "channel", submit=reject) is False
 
 
-@pytest.mark.parametrize(
-    ("module", "client_type", "source_attr"),
-    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name')],
-)
-def test_threaded_channels_submit_through_managed_executor(
-    monkeypatch,
-    module,
-    client_type,
-    source_attr,
-):
-    """
-    原裸线程渠道必须把回环任务交给共享 ThreadHelper。
-    """
-    calls = []
-    executor = SimpleNamespace(submit=lambda *_args, **_kwargs: None)
-
-    def submit_message(payload, source, *, submit, timeout=15):
-        """
-        记录渠道传给统一提交边界的参数。
-        """
-        calls.append((payload, source, submit, timeout))
-        return True
-
-    monkeypatch.setattr(module, "ThreadHelper", lambda: executor)
-    monkeypatch.setattr(module, "submit_message_to_host", submit_message)
-    client = object.__new__(client_type)
-    setattr(client, source_attr, "channel-main")
-
-    assert client._forward_to_message_chain({"text": "hello"}) is True
-    assert calls == [({"text": "hello"}, "channel-main", executor.submit, 15)]
 
 
 
 
-def test_slack_preserves_callback_timeout_through_shared_ingress(monkeypatch):
-    """
-    Slack action 的历史长超时必须继续传给统一入口。
-    """
-    forward = MagicMock(return_value=True)
-    monkeypatch.setattr(slack_module, "forward_message_to_host", forward)
-    client = object.__new__(slack_module.Slack)
-    client._config_name = "slack-main"
-
-    assert client._forward_to_message_chain({"action": "run"}, timeout=60) is True
-    forward.assert_called_once_with(
-        {"action": "run"},
-        "slack-main",
-        timeout=60,
-    )
 
 
-@pytest.mark.asyncio
-async def test_discord_uses_shared_async_ingress(monkeypatch):
-    """
-    Discord 自有事件循环不得继续维护独立 httpx 回环实现。
-    """
-    forward = AsyncMock(return_value=True)
-    monkeypatch.setattr(discord_module, "async_forward_message_to_host", forward)
-    client = object.__new__(discord_module.Discord)
-    client._config_name = "discord-main"
-
-    await client._post_to_ds({"text": "hello"})
-
-    forward.assert_awaited_once_with(
-        {"text": "hello"},
-        "discord-main",
-        timeout=10,
-    )
 
 
 def test_message_modules_cannot_reimplement_loopback_endpoint():
@@ -323,7 +261,7 @@ def test_message_modules_cannot_reimplement_loopback_endpoint():
 
 @pytest.mark.parametrize(
     "module,client_type,source_attr",
-    [(telegram_module, telegram_module.Telegram, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
+    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name'), (telegram_module, telegram_module.Telegram, '_config_name'), (slack_module, slack_module.Slack, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
 )
 @pytest.mark.parametrize("accepted", [True, False, None])
 def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type, source_attr, accepted):
@@ -344,6 +282,26 @@ def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type
     assert client._forward_to_message_chain(payload, **extra) is (accepted is True)
     if bound is not None:
         bound.assert_called_once_with(payload, submit=executor.submit)
+    assert port.sync_calls == [] and port.async_calls == []
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("accepted", [True, False, None])
+async def test_discord_uses_only_the_bound_ingress(monkeypatch, accepted):
+    """
+    Discord 自有事件循环也只提交绑定任务，失败不能切换为 HTTP。
+    """
+    executor = SimpleNamespace(submit=Mock())
+    monkeypatch.setattr(discord_module, "ThreadHelper", lambda: executor)
+    client = object.__new__(discord_module.Discord)
+    client._config_name = "discord-main"
+    bound = Mock(return_value=accepted) if accepted is not None else None
+    client._message_ingress = bound
+    assert await client._post_to_ds({"text": "hello"}) is (accepted is True)
+    if bound is not None:
+        bound.assert_called_once_with({"text": "hello"}, submit=executor.submit)
+    port = ingress._message_ingress_snapshot()
     assert port.sync_calls == [] and port.async_calls == []
 
 
