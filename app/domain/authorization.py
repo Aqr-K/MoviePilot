@@ -9,37 +9,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from app.schemas.types import NotificationChannel
-
-LEGACY_CHANNELS = {
-    "telegram": (NotificationChannel.Telegram.value, "TELEGRAM_USERS", "TELEGRAM_ADMINS", "TELEGRAM_CHAT_ID"),
-    "wechat": (NotificationChannel.Wechat.value, "", "WECHAT_ADMINS", "WECHAT_BOT_CHAT_ID"),
-    "wechatclawbot": (
-        NotificationChannel.WechatClawBot.value,
-        "",
-        "WECHATCLAWBOT_ADMINS",
-        "WECHATCLAWBOT_DEFAULT_TARGET",
-    ),
-    "feishu": (NotificationChannel.Feishu.value, "", "FEISHU_ADMINS", "FEISHU_OPEN_ID"),
-    "qqbot": (NotificationChannel.QQ.value, "", "QQBOT_ADMINS", "QQ_OPENID"),
-    "discord": (NotificationChannel.Discord.value, "", "DISCORD_ADMINS", ""),
-    "slack": (NotificationChannel.Slack.value, "", "SLACK_ADMINS", ""),
-    "vocechat": (NotificationChannel.VoceChat.value, "", "VOCECHAT_ADMINS", ""),
-    "synologychat": (NotificationChannel.SynologyChat.value, "", "SYNOLOGYCHAT_ADMINS", ""),
-}
-
-CHANNEL_BINDINGS = {
-    NotificationChannel.Telegram.value: ("telegram_userid",),
-    NotificationChannel.Wechat.value: ("wechat_userid",),
-    NotificationChannel.WechatClawBot.value: ("wechatclawbot_userid",),
-    NotificationChannel.Feishu.value: ("feishu_userid", "feishu_openid"),
-    NotificationChannel.QQ.value: ("qq_userid", "qq_openid"),
-    NotificationChannel.Discord.value: ("discord_userid",),
-    NotificationChannel.Slack.value: ("slack_userid",),
-    NotificationChannel.VoceChat.value: ("vocechat_userid",),
-    NotificationChannel.SynologyChat.value: ("synologychat_userid",),
-}
-
 # 新成员默认拥有的业务能力；定时任务和管理员能力必须单独授予。
 DEFAULT_MEMBER_SCOPES = ("search", "subscribe", "download")
 # 授权系统接受的完整能力集合，管理员拥有全部能力。
