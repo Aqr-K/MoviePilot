@@ -127,6 +127,21 @@ class OutboxLeaseLostError(RuntimeError):
     """
 
 
+class OutboxRetryDelay(RuntimeError):
+    """
+    通知提供方要求延后重试，Outbox 仍然执行正常的重试次数限制。
+    """
+
+    def __init__(self, reason: str, seconds: int) -> None:
+        """
+        :param reason: 保存到 Outbox 的失败原因
+        :param seconds: 提供方建议的等待时间
+        """
+        super().__init__(reason)
+        self.seconds = seconds
+
+
+
 def validate_durable_event_handlers(
     handlers: Mapping[str, Callable[[ClaimedOutboxMessage], None]],
 ) -> None:
@@ -594,6 +609,8 @@ class OutboxDispatcher:
         """
         dead = message.attempt >= self._max_attempts
         delay = min(3600, 2 ** min(12, max(0, message.attempt - 1)))
+        if isinstance(error, OutboxRetryDelay):
+            delay = max(delay, min(86400, error.seconds))
         settled = self._repository.retry(
             message.message_id, message.attempt,
             next_retry_at=self._clock() + timedelta(seconds=delay),
