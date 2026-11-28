@@ -264,6 +264,24 @@ class ChainUserRepository(Protocol):
         :return: 用户通知设置的只读快照；用户不存在时返回 None
         """
 
+    def get_owner_notification_settings(self, owner_identity: str) -> Optional[Mapping[str, FrozenJson]]:
+        """
+        读取仍有效的订阅账号通知地址。
+
+        :param owner_identity: 已确认的稳定业务归属，不使用展示用户名
+        :return: 当前有效账号的只读通知目标；停用或不存在时为空
+        """
+        ...
+
+    async def async_get_owner_notification_settings(self, owner_identity: str) -> Optional[Mapping[str, FrozenJson]]:
+        """
+        异步读取仍有效的订阅账号通知地址。
+
+        :param owner_identity: 已确认的稳定业务归属，不使用展示用户名
+        :return: 当前有效账号的只读通知目标；停用或不存在时为空
+        """
+        ...
+
     def get_notification_broadcast_targets(self) -> Mapping[str, tuple[str, ...]]:
         """
         查询所有启用用户的逐账号通知目标，仅由所有用户范围使用。
