@@ -328,11 +328,13 @@ def test_bot_mode_receives_same_native_image_request(
 
     module.post_message(message)
 
-    expected = {"title": "标题", "text": None, "image": _IMAGE_URL,
-                "userid": "member-1", "link": "https://detail.example"}
-    if native_image:
-        expected["native_image"] = True
-    send.assert_called_once_with(**expected)
+    send.assert_called_once()
+    kwargs = send.call_args.kwargs
+    assert {key: kwargs[key] for key in ("title", "text", "image", "userid", "link")} == {
+        "title": "标题", "text": None, "image": _IMAGE_URL,
+        "userid": "member-1", "link": "https://detail.example",
+    }
+    assert kwargs.get("native_image", False) is native_image and callable(kwargs["part_sender"])
 
 
 def test_native_image_respects_notification_filter(

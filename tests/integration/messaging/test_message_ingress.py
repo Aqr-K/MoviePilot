@@ -16,7 +16,6 @@ from app.modules.feishu import feishu as feishu_module
 from app.modules.qqbot import qqbot as qqbot_module
 from app.modules.slack import slack as slack_module
 from app.modules.telegram import telegram as telegram_module
-from app.modules.wechat import wechatbot as wechat_module
 from app.modules.wechatclawbot import wechatclawbot as clawbot_module
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -242,7 +241,7 @@ def test_submit_message_to_host_copies_payload_and_reports_admission_failure():
 
 @pytest.mark.parametrize(
     ("module", "client_type", "source_attr"),
-    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name'), (wechat_module, wechat_module.WeChatBot, '_config_name')],
+    [(feishu_module, feishu_module.Feishu, '_name'), (qqbot_module, qqbot_module.QQBot, '_config_name')],
 )
 def test_threaded_channels_submit_through_managed_executor(
     monkeypatch,
@@ -272,26 +271,6 @@ def test_threaded_channels_submit_through_managed_executor(
     assert calls == [({"text": "hello"}, "channel-main", executor.submit, 15)]
 
 
-@pytest.mark.parametrize(
-    ("module", "client_type", "source_attr"),
-    [(clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
-)
-def test_sync_channels_forward_through_shared_ingress(
-    monkeypatch,
-    module,
-    client_type,
-    source_attr,
-):
-    """
-    同步轮询渠道必须复用统一回环请求和确认语义。
-    """
-    forward = MagicMock(return_value=True)
-    monkeypatch.setattr(module, "forward_message_to_host", forward)
-    client = object.__new__(client_type)
-    setattr(client, source_attr, "channel-main")
-
-    assert client._forward_to_message_chain({"text": "hello"}) is True
-    forward.assert_called_once_with({"text": "hello"}, "channel-main")
 
 
 def test_slack_preserves_callback_timeout_through_shared_ingress(monkeypatch):
@@ -344,7 +323,7 @@ def test_message_modules_cannot_reimplement_loopback_endpoint():
 
 @pytest.mark.parametrize(
     "module,client_type,source_attr",
-    [(telegram_module, telegram_module.Telegram, '_config_name')],
+    [(telegram_module, telegram_module.Telegram, '_config_name'), (clawbot_module, clawbot_module.WechatClawBot, '_config_name')],
 )
 @pytest.mark.parametrize("accepted", [True, False, None])
 def test_sdk_clients_use_only_the_bound_ingress(monkeypatch, module, client_type, source_attr, accepted):
