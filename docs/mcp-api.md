@@ -860,3 +860,14 @@ REST 调用示例：
 - [下载器操作参考](../skills/downloader-operation/SKILL.md)、[媒体服务器操作参考](../skills/mediaserver-operation/SKILL.md)、[数据库操作参考](../skills/database-operation/SKILL.md)：原生服务与 SQL 操作合同。
 
 本文维护连接方式、发现流程、调用结构和结果处理。字段清单、操作全集、提供方差异由运行时 Schema 及对应参考维护；新增业务能力时不应继续向本文追加 REST 路由表、前端展示契约或版本变更记录。
+
+### 浏览器推送设备的 REST 登记
+
+`POST /api/v1/message/webpush/subscribe` 和 `POST /api/v1/message/webpush/unsubscribe`
+使用当前启用的本地网页登录账号。请求体只含 `endpoint` 与 `keys.p256dh`、`keys.auth`，
+不接受客户端指定的 owner；服务在短事务内重新核验账号。跨账号换绑需提供现有端点的完整旧密钥，
+证明不匹配或登记版本冲突返回 409，无效或停用账号返回 403。撤销仅处理本人仍持有的设备，
+跨账号及迟到请求保持幂等，不泄漏其他账号是否拥有端点。
+
+管理发送接口只选取已持久化且仍属有效本地账号的设备；历史无归属进程登记不加入个人或全体投递。
+旧失效回执只清理其实际发送版本，不能删除新登记。上述设备接口不增加 Agent operation 授权。
