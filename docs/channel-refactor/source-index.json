@@ -1,10 +1,16 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "upstream_base": "da978d051c6eb5aec8863d96f5b2f77e8731532c",
-  "original_integrated_source": "45811b68a01d6ff0cf599f654f93fbdf94e801c6",
-  "code_revision": "610cc4a1b7d6720634312b57d7d1aad5fe1c8df8",
-  "code_tree": "95d3543368d864a6ef0213802e081fa7585418d8",
+  "series_base": {
+    "branch": "refactor/channel-series-base",
+    "head": "6689c8adddaf582938deaa1065d86f1843836f49",
+    "purpose": "只聚合独立前置，供 fork 堆叠审阅；不作为一个大 PR 移交官方"
+  },
+  "code_revision": "6544f02a40a8135710649fbfff7ce73a7af5f0a3",
+  "code_tree": "d6d6a18f87f0ad434b21a7860a3c339ff9317a4d",
   "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
+  "documentation_pr": "https://github.com/Aqr-K/MoviePilot/pull/125",
+  "documentation_branch": "docs/channel-series-review-index",
   "frontend": {
     "revision": "148c6e7d01c794b8728e3bdeee8267e1719ab49e",
     "pr": "https://github.com/jxxghp/MoviePilot-Frontend/pull/976",
@@ -12,766 +18,448 @@
   },
   "independent_official_prs": [
     {
-      "pr": "https://github.com/jxxghp/MoviePilot/pull/7638",
+      "number": 7638,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7638",
+      "state": "closed",
+      "merged": true,
+      "head": "b685e3fae5855aeed0ef69f02a272ed045b54944",
       "branch": "fix/channel-series-postgresql",
-      "head": "b685e3fae5855aeed0ef69f02a272ed045b54944"
+      "base": "da978d051c6eb5aec8863d96f5b2f77e8731532c"
     },
     {
-      "pr": "https://github.com/jxxghp/MoviePilot/pull/7639",
+      "number": 7639,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7639",
+      "state": "open",
+      "merged": false,
+      "head": "0a26bd81144228faf04b7116f599f614b8ab05d7",
       "branch": "feat/channel-series-contracts",
-      "head": "0a26bd81144228faf04b7116f599f614b8ab05d7"
+      "base": "da978d051c6eb5aec8863d96f5b2f77e8731532c"
     },
     {
-      "pr": "https://github.com/jxxghp/MoviePilot/pull/7640",
+      "number": 7640,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7640",
+      "state": "closed",
+      "merged": true,
+      "head": "08e9151ab8d858e9ab72762c5ed878570d65c8f6",
       "branch": "fix/channel-series-transport-identifiers",
-      "head": "08e9151ab8d858e9ab72762c5ed878570d65c8f6"
+      "base": "da978d051c6eb5aec8863d96f5b2f77e8731532c"
     },
     {
-      "pr": "https://github.com/jxxghp/MoviePilot/pull/7642",
+      "number": 7642,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7642",
+      "state": "closed",
+      "merged": true,
+      "head": "094258f41cb596a12d73714533772fee9141fe56",
       "branch": "test/channel-series-transfer-isolation",
-      "head": "094258f41cb596a12d73714533772fee9141fe56"
+      "base": "74ab99bb0f69a280eaa0b5a778de4fc334df9652"
     },
     {
-      "pr": "https://github.com/jxxghp/MoviePilot/pull/7643",
+      "number": 7643,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7643",
+      "state": "closed",
+      "merged": true,
+      "head": "aa01a2ec86c1fe6c9dffee4cda808d25ef4b4380",
       "branch": "test/channel-series-terminal-output",
-      "head": "aa01a2ec86c1fe6c9dffee4cda808d25ef4b4380"
+      "base": "74ab99bb0f69a280eaa0b5a778de4fc334df9652"
     }
   ],
   "dependency_units": [
     {
-      "unit": 4,
-      "branch": "refactor/channel-series-platform-contract",
+      "unit": 1,
+      "scope": "平台扩展契约与内置身份事实",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/103",
+      "branch": "refactor/channel-series-platform-facts",
       "base_branch": "refactor/channel-series-base",
-      "head": "df6771f4afb3e58a749546145e19e590711acd07",
-      "tree": "510688172bda681d37525d6e1332e6d1e36d5a07",
-      "app_tree": "32dc92756a47afb387e54d007c54f6bea673d230",
-      "commits": [
-        "aee1a720d01b9a95e40bbb0e1fb6c6c87c68a107",
-        "df6771f4afb3e58a749546145e19e590711acd07"
+      "implementation_commit": "76339baadda56f660debcc9cc7e35b46ae651bb4",
+      "implementation_parent": "6689c8adddaf582938deaa1065d86f1843836f49",
+      "implementation_tree": "6e45d84c97ea385d63d0518933db883f1290382c",
+      "app_tree": "8594a1aef6621021fe0ef35613e2d721327f3385",
+      "consolidated_prs": [
+        102,
+        103
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/102",
       "verification": {
-        "full_test_tree": "7ec63e3af6437c577932ff967f6ef380af6b666a",
-        "final_tree": "510688172bda681d37525d6e1332e6d1e36d5a07",
-        "app_tree": "32dc92756a47afb387e54d007c54f6bea673d230",
-        "passed": 22730,
-        "skipped": 22,
-        "supplemental_contract_tests": 6,
-        "notes": "初次分片 5 有两项时序测试失败，原样复验该分片全通过；全量后仅新增测试和更新经审阅的两项冷导入模块事实，app tree 未变。",
-        "head": "df6771f4afb3e58a749546145e19e590711acd07",
-        "url": "https://github.com/Aqr-K/MoviePilot/pull/102"
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "7a43aa3aa1adfacffc1bf767f646454d4e30b9e6",
+          "source_tree": "6e45d84c97ea385d63d0518933db883f1290382c",
+          "passed": 22741,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 2,
+      "scope": "连接资源、规则配置与固定离线升级",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/105",
+      "branch": "feat/channel-series-offline-migration",
+      "base_branch": "refactor/channel-series-platform-facts",
+      "implementation_commit": "63ce0b7ef7fbec59c6a874f8c927c7efd733715a",
+      "implementation_parent": "76339baadda56f660debcc9cc7e35b46ae651bb4",
+      "implementation_tree": "22c88159aa3d6e1e243b0c190a3c1487b3b35e88",
+      "app_tree": "ab23b1a72c3d132613a8875d2e873d65df211a2e",
+      "consolidated_prs": [
+        104,
+        105
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "46632db1daed64cf5651e50325d3a19a86be5265",
+          "source_tree": "22c88159aa3d6e1e243b0c190a3c1487b3b35e88",
+          "passed": 22831,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 3,
+      "scope": "规范授权服务与仓储",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/106",
+      "branch": "refactor/channel-series-authorization",
+      "base_branch": "feat/channel-series-offline-migration",
+      "implementation_commit": "fc25e1d74cf36c05c99d93ae384c0c528dad6854",
+      "implementation_parent": "63ce0b7ef7fbec59c6a874f8c927c7efd733715a",
+      "implementation_tree": "2a2912e4faac698d73c7993457a925b500c5f352",
+      "app_tree": "3523b608e0efa6b5dd4b225e08f2964435533ba2",
+      "consolidated_prs": [
+        106
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "10566fb89957768c0295eb8127ed94aaef5bb0c3",
+          "source_tree": "2a2912e4faac698d73c7993457a925b500c5f352",
+          "passed": 22885,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 4,
+      "scope": "订阅及下载业务归属与提交前复核",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/108",
+      "branch": "feat/channel-series-download-ownership",
+      "base_branch": "refactor/channel-series-authorization",
+      "implementation_commit": "eadd0a21ebefcf673d1685864ddd099fbe72d486",
+      "implementation_parent": "fc25e1d74cf36c05c99d93ae384c0c528dad6854",
+      "implementation_tree": "f234a33ed7fea7464ece1e3b0c586f6fd7ead886",
+      "app_tree": "d72a56ad6c44bf546ff64e8946a06f1854e33e2a",
+      "consolidated_prs": [
+        107,
+        108
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "40a3ab42247c3c4e55806df812242460f61e037b",
+          "source_tree": "f234a33ed7fea7464ece1e3b0c586f6fd7ead886",
+          "passed": 22909,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 5,
-      "branch": "refactor/channel-series-platform-facts",
-      "base_branch": "refactor/channel-series-platform-contract",
-      "head": "7a43aa3aa1adfacffc1bf767f646454d4e30b9e6",
-      "tree": "6e45d84c97ea385d63d0518933db883f1290382c",
-      "app_tree": "8594a1aef6621021fe0ef35613e2d721327f3385",
-      "commits": [
-        "7a43aa3aa1adfacffc1bf767f646454d4e30b9e6"
+      "scope": "浏览器设备归属持久化",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/109",
+      "branch": "feat/channel-series-webpush-persistence",
+      "base_branch": "feat/channel-series-download-ownership",
+      "implementation_commit": "5c82653192a542e81c44fbf7b9905e05b505bd51",
+      "implementation_parent": "eadd0a21ebefcf673d1685864ddd099fbe72d486",
+      "implementation_tree": "1dec9cc787a69ebe4bbdbd1e8ee2d2719796b3bc",
+      "app_tree": "34d7f5c701a512cf195850ea4fb18ef4bfb597a4",
+      "consolidated_prs": [
+        109
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/103",
       "verification": {
-        "tree": "6e45d84c97ea385d63d0518933db883f1290382c",
-        "passed": 22741,
-        "skipped": 22,
-        "supplemental_tests": 68,
-        "scope": "全量中仅类型门禁失败；把所引用的两个协议诊断方法及其既有回归提前到本单元后，原文件分片 8 和类型门禁通过。之后新增协议合同测试，68 项通过；全部新增平台实现专项行覆盖率 >80%。"
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "49f0c87139295bbb8230505157cb55ce41a9c2fa",
+          "source_tree": "1dec9cc787a69ebe4bbdbd1e8ee2d2719796b3bc",
+          "passed": 22917,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 6,
-      "branch": "feat/channel-series-resource-settings",
-      "base_branch": "refactor/channel-series-platform-facts",
-      "head": "089f2c2929dae0b63141dc512d5d09ed7cce806a",
-      "tree": "b420d6485df4debe2c438ac77177aebd2b2a1ea6",
-      "app_tree": "2a03e19b11f5ef744ad3f174fc1923061d4bbc2f",
-      "commits": [
-        "089f2c2929dae0b63141dc512d5d09ed7cce806a"
+      "scope": "冻结投递计划与分段恢复",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/110",
+      "branch": "refactor/channel-series-delivery-progress",
+      "base_branch": "feat/channel-series-webpush-persistence",
+      "implementation_commit": "2279b82561a5b53e155f171e1a34ca9226a61cd8",
+      "implementation_parent": "5c82653192a542e81c44fbf7b9905e05b505bd51",
+      "implementation_tree": "68e96c42b062d0b08d629bbc8cc7ad6e29852606",
+      "app_tree": "a33c598c0df24a6caccb3f11f35accd0267140b1",
+      "consolidated_prs": [
+        110
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/104",
       "verification": {
-        "tree": "b420d6485df4debe2c438ac77177aebd2b2a1ea6",
-        "passed": 22813,
-        "skipped": 22,
-        "focused_tests": 129,
-        "scope": "原全量仅继承的两项平台诊断方法缺失导致 mypy 失败。前置单元补齐后原分片复验通过；新增及相关平台/配置规则专项 129 通过。新模块专项行覆盖率均高于80%。并发快照只移入本功能已有的精确受管 worker owner，未改变并发实现或门槛。"
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "f61637e0df26a30e9880c8097dbd8d015f5013d4",
+          "source_tree": "68e96c42b062d0b08d629bbc8cc7ad6e29852606",
+          "passed": 22949,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 7,
-      "branch": "feat/channel-series-offline-migration",
-      "base_branch": "feat/channel-series-resource-settings",
-      "head": "46632db1daed64cf5651e50325d3a19a86be5265",
-      "tree": "22c88159aa3d6e1e243b0c190a3c1487b3b35e88",
-      "app_tree": "ab23b1a72c3d132613a8875d2e873d65df211a2e",
-      "commits": [
-        "46632db1daed64cf5651e50325d3a19a86be5265"
+      "scope": "可信 SDK 入站与交互作用域",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/112",
+      "branch": "refactor/channel-series-host-ingress",
+      "base_branch": "refactor/channel-series-delivery-progress",
+      "implementation_commit": "42d40a328f3d9153c7eed83280b20da1abaaab90",
+      "implementation_parent": "2279b82561a5b53e155f171e1a34ca9226a61cd8",
+      "implementation_tree": "acb68007619d1a8cbbb5bf2de82db9ddd199ff31",
+      "app_tree": "09f580f50d3695b511a69da1bc3c8d610239d6fe",
+      "consolidated_prs": [
+        111,
+        112
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/105",
       "verification": {
-        "tree": "22c88159aa3d6e1e243b0c190a3c1487b3b35e88",
-        "passed": 22831,
-        "skipped": 22,
-        "migration_and_policy_tests": 128,
-        "doc_tests": 22,
-        "scope": "全量中数据库新增表的生成说明未同行进入，补齐现有生成器、数据库技能说明及技能版本断言后原分片4、8复验通过。其它六分片通过；全部静态检查及pylint与启动预算通过。"
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "c5cb0d0b1f34e0b6b5e3408dbc5829d08c0d77ee",
+          "source_tree": "acb68007619d1a8cbbb5bf2de82db9ddd199ff31",
+          "passed": 22989,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 8,
-      "branch": "refactor/channel-series-authorization",
-      "base_branch": "feat/channel-series-offline-migration",
-      "head": "10566fb89957768c0295eb8127ed94aaef5bb0c3",
-      "tree": "2a2912e4faac698d73c7993457a925b500c5f352",
-      "app_tree": "3523b608e0efa6b5dd4b225e08f2964435533ba2",
-      "commits": [
-        "10566fb89957768c0295eb8127ed94aaef5bb0c3"
+      "scope": "浏览器投递及设备 API 装配",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/113",
+      "branch": "feat/channel-series-webpush-delivery",
+      "base_branch": "refactor/channel-series-host-ingress",
+      "implementation_commit": "f9dddb80033b0fdf0c5b0ad4cafc1e1fb328bd5e",
+      "implementation_parent": "42d40a328f3d9153c7eed83280b20da1abaaab90",
+      "implementation_tree": "411aa8d3d8861f051836b88e5f5d76b7d2a575b5",
+      "app_tree": "5d5b87178ed375c77fe63961de6dda704b1e9669",
+      "consolidated_prs": [
+        113
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/106",
       "verification": {
-        "tree": "2a2912e4faac698d73c7993457a925b500c5f352",
-        "app_tree": "3523b608e0efa6b5dd4b225e08f2964435533ba2",
-        "full_suite_tree": "4539c988d83aa55fa4aa21272a1bfc41f214a158",
-        "full_suite_passed": 22885,
-        "full_suite_skipped": 22,
-        "supplemental_passed": 250,
-        "authorization_line_coverage_percent": 86.1,
-        "pylint_changed": "10.00/10",
-        "pylint_app": "10.00/10",
-        "startup_import_additions": {
-          "added": [
-            "app.application.messaging.channel",
-            "app.application.messaging.channel.catalog",
-            "app.application.messaging.channel.rules",
-            "app.application.messaging.delivery",
-            "app.domain.admission"
-          ],
-          "removed": []
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "5371f332c7e7ec8d6c4dacaae75d5072dceb23b9",
+          "source_tree": "411aa8d3d8861f051836b88e5f5d76b7d2a575b5",
+          "passed": 23014,
+          "skipped": 22
         },
-        "startup_budget_ms": 3000,
-        "evidence": "All 8 full shards and 10 static checks passed before test-only supplements. App tree unchanged; supplemental coverage, metadata tests, Ruff and live startup rechecked. Only exact module inventory +5 changed; unchanged timing budget.",
-        "passed": 22885,
-        "skipped": 22
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 9,
-      "branch": "feat/channel-series-subscription-ownership",
-      "base_branch": "refactor/channel-series-authorization",
-      "head": "cb14f801e7a2d53a5794bdb26e8008f20ca00d01",
-      "tree": "5f7d56a4ec2afc3035c388b8bea1b8765a16585d",
-      "app_tree": "c19f8607d1ec7c7432c074cac2b6fe7de4fb73fa",
-      "commits": [
-        "cb14f801e7a2d53a5794bdb26e8008f20ca00d01"
+      "scope": "运行装配、资源入口与业务 API",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/115",
+      "branch": "feat/channel-series-owned-business-api",
+      "base_branch": "feat/channel-series-webpush-delivery",
+      "implementation_commit": "3c03d1909934069f9b571c8c783a64cf913f9b02",
+      "implementation_parent": "f9dddb80033b0fdf0c5b0ad4cafc1e1fb328bd5e",
+      "implementation_tree": "257bfaf3e990c9de74f455f8158402f29be82eef",
+      "app_tree": "3ffdbb64ac142c08fcc0a5d5d0bb40fb28238771",
+      "consolidated_prs": [
+        114,
+        115
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/107",
       "verification": {
-        "tree": "5f7d56a4ec2afc3035c388b8bea1b8765a16585d",
-        "app_tree": "c19f8607d1ec7c7432c074cac2b6fe7de4fb73fa",
-        "full_suite_tree": "811faf299f2b10acffa9fd4b649744b8004390f5",
-        "passed": 22901,
-        "skipped": 22,
-        "focused_passed": 145,
-        "ownership_branch_coverage_percent": 92.68,
-        "metadata_passed": 72,
-        "post_full_executable_app_changes": false,
-        "doc_only_app_paths": [
-          "app/application/subscription/ownership.py",
-          "app/db/adapters/subscription.py"
-        ],
-        "startup_import_delta": {
-          "added": [
-            "app.application.subscription.ownership"
-          ],
-          "removed": []
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "c27065dd828d4924f940542b6419c07823ceecce",
+          "source_tree": "257bfaf3e990c9de74f455f8158402f29be82eef",
+          "passed": 23059,
+          "skipped": 22
         },
-        "startup_budget_ms": 3000,
-        "evidence": "Full 8 shards and 10 static checks passed; parent supplemental tests propagated, protocol documentation supplemented with identical executable AST. Changed/all-app pylint passed. Startup exact module count +1 reviewed and final performance rechecked."
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 10,
-      "branch": "feat/channel-series-download-ownership",
-      "base_branch": "feat/channel-series-subscription-ownership",
-      "head": "40a3ab42247c3c4e55806df812242460f61e037b",
-      "tree": "f234a33ed7fea7464ece1e3b0c586f6fd7ead886",
-      "app_tree": "d72a56ad6c44bf546ff64e8946a06f1854e33e2a",
-      "commits": [
-        "40a3ab42247c3c4e55806df812242460f61e037b"
+      "scope": "Telegram 认证接入与分段恢复",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/116",
+      "branch": "refactor/channel-series-telegram",
+      "base_branch": "feat/channel-series-owned-business-api",
+      "implementation_commit": "0e58e9e43e5ae4f44e2634d5572d0dbc89672655",
+      "implementation_parent": "3c03d1909934069f9b571c8c783a64cf913f9b02",
+      "implementation_tree": "90bea0a5883b3fb7d1a749cdecc754d1c93bad5d",
+      "app_tree": "6454ed4bb69966bc98e6f0edb658e2f6e3492ef5",
+      "consolidated_prs": [
+        116
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/108",
       "verification": {
-        "tree": "f234a33ed7fea7464ece1e3b0c586f6fd7ead886",
-        "app_tree": "d72a56ad6c44bf546ff64e8946a06f1854e33e2a",
-        "full_suite_tree": "62ec26c63923c9045992c16dcc68a7746e154aca",
-        "passed": 22909,
-        "skipped": 22,
-        "focused_passed": 253,
-        "supplemental_passed": 13,
-        "app_changed_since_full": false,
-        "pylint_changed": "10.00/10",
-        "pylint_app": "10.00/10",
-        "evidence": "Full8 and all static passed after removing a single unused test import; final Ruff/test/performance rechecked. No app source changed since full suite."
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "19fd27f8673da0368e9102f2b064d3c872226c1f",
+          "source_tree": "90bea0a5883b3fb7d1a749cdecc754d1c93bad5d",
+          "passed": 23091,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 11,
-      "branch": "feat/channel-series-webpush-persistence",
-      "base_branch": "feat/channel-series-download-ownership",
-      "head": "49f0c87139295bbb8230505157cb55ce41a9c2fa",
-      "tree": "1dec9cc787a69ebe4bbdbd1e8ee2d2719796b3bc",
-      "app_tree": "34d7f5c701a512cf195850ea4fb18ef4bfb597a4",
-      "commits": [
-        "49f0c87139295bbb8230505157cb55ce41a9c2fa"
+      "scope": "企业微信应用、机器人及 ClawBot",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/118",
+      "branch": "refactor/channel-series-clawbot",
+      "base_branch": "refactor/channel-series-telegram",
+      "implementation_commit": "5345e92b98b0c589a03c4de5dcd03e09998f77aa",
+      "implementation_parent": "0e58e9e43e5ae4f44e2634d5572d0dbc89672655",
+      "implementation_tree": "4e4ea66c807f0ebb63b80fd0dc0b0e8ba5c4af0a",
+      "app_tree": "6d2f1cd8bd645d2a8d9c31ae935c939496d4165a",
+      "consolidated_prs": [
+        117,
+        118
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/109",
       "verification": {
-        "tree": "1dec9cc787a69ebe4bbdbd1e8ee2d2719796b3bc",
-        "app_tree": "34d7f5c701a512cf195850ea4fb18ef4bfb597a4",
-        "full_suite_tree": "09b3cac0c56c95592ad4db266636089e65240a17",
-        "passed": 22917,
-        "skipped": 22,
-        "focused_passed": 117,
-        "final_webpush_tests_passed": 26,
-        "webpush_line_coverage_percent": 90.67,
-        "evidence": "Full8 plus static gates passed except new fixture-import Ruff; fixed with file-local fixture wrapping canonical test support generator, no global conftest. All 26 browser tests, final Ruff and pylint pass. App tree unchanged; startup unchanged and passed."
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "caf943f2ffcfdabc99e5682d4d56d89538275d88",
+          "source_tree": "4e4ea66c807f0ebb63b80fd0dc0b0e8ba5c4af0a",
+          "passed": 23129,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 12,
-      "branch": "refactor/channel-series-delivery-progress",
-      "base_branch": "feat/channel-series-webpush-persistence",
-      "head": "f61637e0df26a30e9880c8097dbd8d015f5013d4",
-      "tree": "68e96c42b062d0b08d629bbc8cc7ad6e29852606",
-      "app_tree": "a33c598c0df24a6caccb3f11f35accd0267140b1",
-      "commits": [
-        "a0965331fb366361c76cd6369bc9bf0976183335",
-        "f61637e0df26a30e9880c8097dbd8d015f5013d4"
+      "scope": "其他内置平台的入站与投递实现",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/122",
+      "branch": "refactor/channel-series-callback-delivery",
+      "base_branch": "refactor/channel-series-clawbot",
+      "implementation_commit": "4fe7d03187c1be3cc047e9d4d605785b0eec5b2e",
+      "implementation_parent": "5345e92b98b0c589a03c4de5dcd03e09998f77aa",
+      "implementation_tree": "61e2e7964d4d7fabfeca9b4f34edd75891072b91",
+      "app_tree": "fd2823f32e3e4b538db3becc12cb7cea6d3998be",
+      "consolidated_prs": [
+        119,
+        120,
+        121,
+        122
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/110",
       "verification": {
-        "tree": "68e96c42b062d0b08d629bbc8cc7ad6e29852606",
-        "app_tree": "a33c598c0df24a6caccb3f11f35accd0267140b1",
-        "full_suite_tree": "436eaeafb1c65e783cea10da2717067360abf155",
-        "passed": 22949,
-        "skipped": 22,
-        "full_shard3_rerun": "backend-pr-series-stage12-shard3-rerun.log",
-        "delivery_branch_coverage_percent": 96.45,
-        "post_full_app_executable_changes": false,
-        "doc_only_paths": [
-          "app/application/messaging/attachment.py",
-          "app/application/messaging/delivery.py"
-        ],
-        "additional_independent_fix_pr": "https://github.com/jxxghp/MoviePilot/pull/7642",
-        "evidence": "Full8 with original failed shard3 rerun passed; upstream singleton repository test leak fixed independently and retained. All10 static passed. Webpush fixture propagation and doc-only app changes rechecked in supplemental focused tests. Changed and full app pylint10. Initial parallel startup samples exceeded time under concurrent validation; isolated final repeat3 passed ~1.83s, unchanged 3000ms ceiling and module counts."
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "b4a0a0f6c4d5bd95cb8fbe23f79828b7ad5b24b3",
+          "source_tree": "61e2e7964d4d7fabfeca9b4f34edd75891072b91",
+          "passed": 23169,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 13,
-      "branch": "refactor/channel-series-interaction-context",
-      "base_branch": "refactor/channel-series-delivery-progress",
-      "head": "bc0e8531a15dec2bc7e699d1d749bcddf1b76b7a",
-      "tree": "f0256ced8dc25ba8251b8f22f617f0d5b8f02418",
-      "app_tree": "8f3b9c1968fa7ea5cce4e4f41662361bb9c33997",
-      "commits": [
-        "bc0e8531a15dec2bc7e699d1d749bcddf1b76b7a"
+      "scope": "审批回执、持久投递与安全回归",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/123",
+      "branch": "refactor/channel-series-authorization-outbox",
+      "base_branch": "refactor/channel-series-callback-delivery",
+      "implementation_commit": "8c87368a80f70b18765a5647e3fceef41405ad4a",
+      "implementation_parent": "4fe7d03187c1be3cc047e9d4d605785b0eec5b2e",
+      "implementation_tree": "9c06694f239802ecbbceddfd113bcf919d4b8243",
+      "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
+      "consolidated_prs": [
+        123
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/111",
       "verification": {
-        "tree": "f0256ced8dc25ba8251b8f22f617f0d5b8f02418",
-        "app_tree": "8f3b9c1968fa7ea5cce4e4f41662361bb9c33997",
-        "full_suite_tree": "d50ce64ee9efb1aeb7c6d25de0116728e5e52871",
-        "passed": 22962,
-        "skipped": 22,
-        "focused_passed": 134,
-        "final_focused_passed": 122,
-        "post_full_app_ast_changes": false,
-        "startup_import_delta": {
-          "added": [],
-          "removed": []
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "22a761d41197f4ed097aed79d82da10b713b5f9a",
+          "source_tree": "9c06694f239802ecbbceddfd113bcf919d4b8243",
+          "passed": 23346,
+          "skipped": 22
         },
-        "evidence": "Full8 after full original shards1+2 rerun passed; missing typed request/address fixtures aligned with actual contract, no weaker assertions. All10 static passed after import formatting only. Changed + app pylint10; final122 focused pass; quiet startup repeat3~1.88s under unchanged3000ms/counts."
+        "product_changes": false,
+        "documentation_follows": false
       }
     },
     {
       "unit": 14,
-      "branch": "refactor/channel-series-host-ingress",
-      "base_branch": "refactor/channel-series-interaction-context",
-      "head": "c5cb0d0b1f34e0b6b5e3408dbc5829d08c0d77ee",
-      "tree": "acb68007619d1a8cbbb5bf2de82db9ddd199ff31",
-      "app_tree": "09f580f50d3695b511a69da1bc3c8d610239d6fe",
-      "commits": [
-        "c5cb0d0b1f34e0b6b5e3408dbc5829d08c0d77ee"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/112",
-      "verification": {
-        "tree": "acb68007619d1a8cbbb5bf2de82db9ddd199ff31",
-        "app_tree": "09f580f50d3695b511a69da1bc3c8d610239d6fe",
-        "full_suite_tree": "78ac8c29cf21f41bf480dde66f6595a12bb31c1f",
-        "rerun_tree": "803866501bf5cf5bfd1a4681ac50acc3fe2059b1",
-        "passed": 22989,
-        "skipped": 22,
-        "platform_fixture_passed": 480,
-        "host_related_passed": 154,
-        "final_host_and_legacy_passed": 50,
-        "ingress_line_coverage_percent": 90.0,
-        "ingress_branch_inclusive_coverage_percent": 88.43,
-        "post_full_app_ast_changes": false,
-        "startup_import_delta": {
-          "added": [],
-          "removed": []
-        },
-        "evidence": "Full8 after original failed shards1,2,4,5,6,8 rerun passed; real connection/provider fixtures replace incomplete/wrong fake metadata, no protocol checks weakened. Strict5ms benchmark passed unchanged in standalone full shard1. All10 static pass after removing one unused test import; changed/all app pylint10, quiet repeat3 startup1.93s under3000ms; initial concurrent startup failure retained in logs."
-      }
-    },
-    {
-      "unit": 15,
-      "branch": "feat/channel-series-webpush-delivery",
-      "base_branch": "refactor/channel-series-host-ingress",
-      "head": "5371f332c7e7ec8d6c4dacaae75d5072dceb23b9",
-      "tree": "411aa8d3d8861f051836b88e5f5d76b7d2a575b5",
-      "app_tree": "5d5b87178ed375c77fe63961de6dda704b1e9669",
-      "commits": [
-        "5371f332c7e7ec8d6c4dacaae75d5072dceb23b9"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/113",
-      "verification": {
-        "tree": "411aa8d3d8861f051836b88e5f5d76b7d2a575b5",
-        "app_tree": "5d5b87178ed375c77fe63961de6dda704b1e9669",
-        "full_suite_tree": "d6468558ff16f38fed251d11dea16bc477ffa251",
-        "passed": 23014,
-        "skipped": 22,
-        "focused_passed": 171,
-        "owner_auth_passed": 53,
-        "doc_generator_passed": 11,
-        "post_full_app_changes": false,
-        "startup_import_delta": {
-          "added": [
-            "app.adapters.network.webpush",
-            "app.application.webpush",
-            "app.db.adapters.webpush",
-            "app.db.models.webpush",
-            "app.db.oper.webpush",
-            "app.schemas.webpush",
-            "app.startup.composition.webpush"
-          ],
-          "removed": []
-        },
-        "evidence": "Full8 after original shard8 auth dependency and owned broadcast expectations migrated with endpoint/repository passed. All10 static pass; changed and app pylint10; startup repeat3~1.86s within unchanged3000ms after exact7 module inventory update. Generated skills unchanged; device REST API docs added. No production source changed since full."
-      }
-    },
-    {
-      "unit": 16,
-      "branch": "refactor/channel-series-runtime-routing",
-      "base_branch": "feat/channel-series-webpush-delivery",
-      "head": "c7402f1fd60db16561bd753954bc87fb09b896d4",
-      "tree": "33dfc15715b056507a38e7265369ea935deab5c3",
-      "app_tree": "bda25fae8a22eacf0c12c2d5d7a7d6b54cdac831",
-      "commits": [
-        "c7402f1fd60db16561bd753954bc87fb09b896d4"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/114",
-      "verification": {
-        "tree": "33dfc15715b056507a38e7265369ea935deab5c3",
-        "app_tree": "bda25fae8a22eacf0c12c2d5d7a7d6b54cdac831",
-        "full_suite_tree": "62c6030298e13d5d55ed93be802e5aa0ba2ac86b",
-        "passed": 23052,
-        "skipped": 22,
-        "repaired_shard": "4/8:2697 passed",
-        "static": "All 10 passed; initial complexity failure was 4 actual reductions, fixed exact entries; Ruff7 unused imports removed. No raised thresholds.",
-        "focused": ".............................................................            [100%]\u001b[32mINFO:\u001b[0m    [moviepilot] 2026-11-27 11:17:20,501 [-] message.py - 正在停止消息队列...\n\n61 passed in 4.33s\n",
-        "pylint": "changed/app 10.00/10; final3 test files10.00/10",
-        "startup": "repeat3 <=1815ms, fixed3000ms, one measured added channel.settings module",
-        "post_full_production_changes": false
-      }
-    },
-    {
-      "unit": 17,
-      "branch": "feat/channel-series-owned-business-api",
-      "base_branch": "refactor/channel-series-runtime-routing",
-      "head": "c27065dd828d4924f940542b6419c07823ceecce",
-      "tree": "257bfaf3e990c9de74f455f8158402f29be82eef",
-      "app_tree": "3ffdbb64ac142c08fcc0a5d5d0bb40fb28238771",
-      "commits": [
-        "a55a2b8d006c8a15c3abf75dd1df44b18b077e27",
-        "c27065dd828d4924f940542b6419c07823ceecce"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/115",
-      "verification": {
-        "tree": "257bfaf3e990c9de74f455f8158402f29be82eef",
-        "app_tree": "3ffdbb64ac142c08fcc0a5d5d0bb40fb28238771",
-        "full_suite_tree": "b7dab2308133480472f5b5d43c13484f8dbbe9d0",
-        "passed": 23059,
-        "skipped": 22,
-        "reused_original_shards": [
-          1,
-          2,
-          3,
-          4,
-          6,
-          7,
-          8
-        ],
-        "rerun_shards": [
-          5
-        ],
-        "focused": 232,
-        "static": "10/10",
-        "pylint": "changed/app10.00",
-        "startup": "repeat3 max median1923.113ms under unchanged3000ms; earlier concurrent4.8s samples retained",
-        "independent_terminal_fix": "jxxghp/MoviePilot#7643"
-      }
-    },
-    {
-      "unit": 18,
-      "branch": "refactor/channel-series-telegram",
-      "base_branch": "feat/channel-series-owned-business-api",
-      "head": "19fd27f8673da0368e9102f2b064d3c872226c1f",
-      "tree": "90bea0a5883b3fb7d1a749cdecc754d1c93bad5d",
-      "app_tree": "6454ed4bb69966bc98e6f0edb658e2f6e3492ef5",
-      "commits": [
-        "19fd27f8673da0368e9102f2b064d3c872226c1f"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/116",
-      "verification": {
-        "tree": "90bea0a5883b3fb7d1a749cdecc754d1c93bad5d",
-        "app_tree": "6454ed4bb69966bc98e6f0edb658e2f6e3492ef5",
-        "full_suite_tree": "f491aa0111c9a48ee9282641effc01cfc640a302",
-        "repair_tree": "4ef19bd6c7a920b5105c2d7554baeabb83e358e3",
-        "passed": 23091,
-        "skipped": 22,
-        "reused_original_shards": [
-          1,
-          2,
-          4,
-          5,
-          6,
-          8
-        ],
-        "rerun_shards": [
-          3,
-          7
-        ],
-        "focused": 127,
-        "post_full_changes": "parent terminal fixture fix (17 additional passing tests) and module inventory doc1236 only; production unchanged; one test EOF whitespace fixed with identical AST",
-        "static": "10/10",
-        "pylint": "changed/app10.00",
-        "startup": "repeat3 maxmedian2415.486ms unchanged3000",
-        "pre_eof_tree": "20f8218913b0a2de23c9f40e37877a725d2edd80"
-      }
-    },
-    {
-      "unit": 19,
-      "branch": "refactor/channel-series-wechat",
-      "base_branch": "refactor/channel-series-telegram",
-      "head": "410b7f2968864e9817120085fc47e56aa8b90d9f",
-      "tree": "517ecee22e9f26d45a8312b9cc38dab018b8b5bc",
-      "app_tree": "90f60630d7feee801dd11f8d3e9c6c4e81e2e253",
-      "commits": [
-        "5b9f514977ee883c5d1c46c134123e43a08a9d75",
-        "410b7f2968864e9817120085fc47e56aa8b90d9f"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/117",
-      "verification": {
-        "tree": "517ecee22e9f26d45a8312b9cc38dab018b8b5bc",
-        "app_tree": "90f60630d7feee801dd11f8d3e9c6c4e81e2e253",
-        "full_suite_tree": "3d0c0a40900b9db39e822a50921807b3aa032d5c",
-        "passed": 23120,
-        "skipped": 22,
-        "focused": 148,
-        "additional_supplement": 105,
-        "replayed_shards": [
-          2,
-          5,
-          6
-        ],
-        "test_only_final_repair": {
-          "case": "test_waiters_receive_output_independently_and_cancel_is_local[False]",
-          "public_fix": "jxxghp/MoviePilot#7643 aa01a2ec8",
-          "whole_affected_file_passed": 17,
-          "scope": "Only per-reader pipe chunk consumption assertion; original deadline and complete content checks retained. Other full5 tests passed; product source unchanged."
-        },
-        "static": "10/10; current Ruff and test-maintenance rechecked after test-only repair",
-        "pylint": "changed/app10.00 plus current two test files10.00",
-        "startup": "module inventory unchanged; final composition measured1939.451ms under3000ms",
-        "post_full_product_changes": false
-      }
-    },
-    {
-      "unit": 20,
-      "branch": "refactor/channel-series-clawbot",
-      "base_branch": "refactor/channel-series-wechat",
-      "head": "caf943f2ffcfdabc99e5682d4d56d89538275d88",
-      "tree": "4e4ea66c807f0ebb63b80fd0dc0b0e8ba5c4af0a",
-      "app_tree": "6d2f1cd8bd645d2a8d9c31ae935c939496d4165a",
-      "commits": [
-        "caf943f2ffcfdabc99e5682d4d56d89538275d88"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/118",
-      "verification": {
-        "tree": "4e4ea66c807f0ebb63b80fd0dc0b0e8ba5c4af0a",
-        "app_tree": "6d2f1cd8bd645d2a8d9c31ae935c939496d4165a",
-        "full_suite_tree": "46ea31873220c00a0ea297c95e631a2a420e0a0b",
-        "passed": 23129,
-        "skipped": 22,
-        "focused": 26,
-        "additional_supplement": 54,
-        "replayed_shards": [
-          5,
-          6
-        ],
-        "static": "10/10; current Ruff and maintenance passed after parent test-only update",
-        "pylint": "changed/app10.00; current test fixture supplement10.00",
-        "post_full_product_changes": false,
-        "post_full_test_changes": "Inherited official terminal reader fixture fix; whole affected file17passed; SDK source unchanged",
-        "startup": "unchanged cold inventory; final composition maxmedian1939.451ms under3000"
-      }
-    },
-    {
-      "unit": 21,
-      "branch": "refactor/channel-series-slack",
-      "base_branch": "refactor/channel-series-clawbot",
-      "head": "7fbb54d21dd21acabd876c3505ae1a66828a5a21",
-      "tree": "9288b6c24655963d918f06bf1837704923bce24b",
-      "app_tree": "40f89c9bcfc34683126b089371a5a817ac7764e5",
-      "commits": [
-        "7fbb54d21dd21acabd876c3505ae1a66828a5a21"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/119",
-      "verification": {
-        "tree": "9288b6c24655963d918f06bf1837704923bce24b",
-        "app_tree": "40f89c9bcfc34683126b089371a5a817ac7764e5",
-        "full_suite_tree": "ef9a94548eb5dbdbe7b12e3264e5fdf24975103f",
-        "passed": 23134,
-        "skipped": 22,
-        "focused": 13,
-        "supplemental_passed": 36,
-        "replayed_shards": [
-          1,
-          4
-        ],
-        "scoped_repairs": {
-          "egress": "Coupled frozen fingerprint follows reviewed SDK fact already present in policy; same52 allowed edges, no new transport exception. Entire egress file revalidated.",
-          "terminal": "Independent official reader cursor fixture fix; entire file revalidated with original deadline."
-        },
-        "static": "9 unchanged-app gates reused; current Ruff and maintenance passed",
-        "pylint": "changed/app10.00; coupled test files10.00",
-        "post_full_product_changes": false
-      }
-    },
-    {
-      "unit": 22,
-      "branch": "refactor/channel-series-workspace-sdk",
-      "base_branch": "refactor/channel-series-slack",
-      "head": "536d835e90a648ef09c17e972701a97ecaed77e6",
-      "tree": "41e6486d1fde97eb31c509795336681583091f42",
-      "app_tree": "ac4f1a38f148505a56d88827e3c9c76dd9ee361e",
-      "commits": [
-        "536d835e90a648ef09c17e972701a97ecaed77e6"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/120",
-      "verification": {
-        "tree": "41e6486d1fde97eb31c509795336681583091f42",
-        "app_tree": "ac4f1a38f148505a56d88827e3c9c76dd9ee361e",
-        "full_suite_tree": "d73fcd3af1dda95916d983f31393af66d223bebe",
-        "passed": 23149,
-        "skipped": 22,
-        "focused": 180,
-        "supplemental_passed": 37,
-        "replayed_shards": [
-          1,
-          4
-        ],
-        "scoped_repairs": {
-          "egress": "Frozen profile follows reviewed Discord/Slack SDK facts already present in exact policy; same52 permitted edges, no wildcard or new transport exception. Entire egress file passed.",
-          "terminal": "Independent official reader cursor fixture fix; entire file revalidated with original deadline.",
-          "browser": "Unchanged capacity test repeated under original12second subprocess deadline; passed. Initial timed process had already reported completed=true."
-        },
-        "static": "9 unchanged-app gates reused; current Ruff and maintenance passed",
-        "pylint": "changed/app10.00; coupled test files10.00",
-        "post_full_product_changes": false
-      }
-    },
-    {
-      "unit": 23,
-      "branch": "refactor/channel-series-qq-voce",
-      "base_branch": "refactor/channel-series-workspace-sdk",
-      "head": "00729d20eb85b1d20d703383d5a7080b5085bb47",
-      "tree": "d65b54c980eee25bb29cd3099e5adc886993a7d3",
-      "app_tree": "c74b735892e5c3b26acca3c4a4cfdbeaf16a9d57",
-      "commits": [
-        "00729d20eb85b1d20d703383d5a7080b5085bb47"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/121",
-      "verification": {
-        "tree": "d65b54c980eee25bb29cd3099e5adc886993a7d3",
-        "app_tree": "c74b735892e5c3b26acca3c4a4cfdbeaf16a9d57",
-        "full_suite_tree": "291459e5b156477fcdaf53e311fdae28edd03c57",
-        "passed": 23161,
-        "skipped": 22,
-        "focused": 32,
-        "supplemental_passed": 80,
-        "partition": {
-          "all_files": 1253,
-          "business_files": 1246,
-          "architecture_files": [
-            "tests/contracts/architecture/test_architecture_adapter_imports.py",
-            "tests/contracts/architecture/test_architecture_baseline_cli.py",
-            "tests/contracts/architecture/test_architecture_contract_baseline.py",
-            "tests/contracts/architecture/test_architecture_dependencies.py",
-            "tests/contracts/architecture/test_architecture_egress.py",
-            "tests/contracts/architecture/test_architecture_event_facts.py",
-            "tests/contracts/architecture/test_architecture_event_policy.py"
-          ],
-          "disjoint_complete_union": true
-        },
-        "scoped_repairs": "Six old QQ/VoceChat assertions moved with canonical sender-vs-conversation fact split; retain actual member admin decisions and assert separate chat_id. Entire affected security file plus platform tests passed.",
-        "static": "10/10 on current index",
-        "pylint": "changed/app10.00 plus coupled test files10.00",
-        "post_full_product_changes": false
-      }
-    },
-    {
-      "unit": 24,
-      "branch": "refactor/channel-series-callback-delivery",
-      "base_branch": "refactor/channel-series-qq-voce",
-      "head": "b4a0a0f6c4d5bd95cb8fbe23f79828b7ad5b24b3",
-      "tree": "61e2e7964d4d7fabfeca9b4f34edd75891072b91",
-      "app_tree": "fd2823f32e3e4b538db3becc12cb7cea6d3998be",
-      "commits": [
-        "b4a0a0f6c4d5bd95cb8fbe23f79828b7ad5b24b3"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/122",
-      "verification": {
-        "tree": "61e2e7964d4d7fabfeca9b4f34edd75891072b91",
-        "app_tree": "fd2823f32e3e4b538db3becc12cb7cea6d3998be",
-        "full_suite_tree": "c4eee06dbf98b27c8aa423f29d0704cea91ba604",
-        "passed": 23169,
-        "skipped": 22,
-        "focused": 164,
-        "supplemental_passed": 99,
-        "partition": {
-          "all_files": 1254,
-          "business_files": 1247,
-          "architecture_files": [
-            "tests/contracts/architecture/test_architecture_adapter_imports.py",
-            "tests/contracts/architecture/test_architecture_baseline_cli.py",
-            "tests/contracts/architecture/test_architecture_contract_baseline.py",
-            "tests/contracts/architecture/test_architecture_dependencies.py",
-            "tests/contracts/architecture/test_architecture_egress.py",
-            "tests/contracts/architecture/test_architecture_event_facts.py",
-            "tests/contracts/architecture/test_architecture_event_policy.py"
-          ],
-          "disjoint_complete_union": true
-        },
-        "scoped_repairs": "Inherited QQ/Voce sender-versus-conversation security assertions moved with parent implementation; whole affected security file and platform tests passed.",
-        "static": "10/10 on current index",
-        "pylint": "changed/app10.00 plus coupled test files10.00",
-        "post_full_product_changes": false
-      }
-    },
-    {
-      "unit": 25,
-      "branch": "refactor/channel-series-authorization-outbox",
-      "base_branch": "refactor/channel-series-callback-delivery",
-      "head": "22a761d41197f4ed097aed79d82da10b713b5f9a",
-      "tree": "9c06694f239802ecbbceddfd113bcf919d4b8243",
-      "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
-      "commits": [
-        "22a761d41197f4ed097aed79d82da10b713b5f9a"
-      ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/123",
-      "verification": {
-        "tree": "9c06694f239802ecbbceddfd113bcf919d4b8243",
-        "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
-        "full_suite_tree": "6a15eab01045b0455ba4dac4561df8f672d7f5ee",
-        "passed": 23346,
-        "skipped": 22,
-        "focused": 456,
-        "partition": {
-          "all_files": 1257,
-          "business_files": 1250,
-          "architecture_files": [
-            "tests/contracts/architecture/test_architecture_adapter_imports.py",
-            "tests/contracts/architecture/test_architecture_baseline_cli.py",
-            "tests/contracts/architecture/test_architecture_contract_baseline.py",
-            "tests/contracts/architecture/test_architecture_dependencies.py",
-            "tests/contracts/architecture/test_architecture_egress.py",
-            "tests/contracts/architecture/test_architecture_event_facts.py",
-            "tests/contracts/architecture/test_architecture_event_policy.py"
-          ],
-          "disjoint_complete_union": true
-        },
-        "static": "10/10; changed and app pylint10.00, supplemental final tests10.00",
-        "post_full_product_changes": false,
-        "post_full_changes": [
-          "docs/channel-refactor/authorization-outbox.md"
-        ]
-      }
-    },
-    {
-      "unit": 26,
-      "branch": "test/channel-series-extension-boundaries",
+      "scope": "SDK 扩展验收、架构约束与最终文档",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/125",
+      "branch": "docs/channel-series-review-index",
       "base_branch": "refactor/channel-series-authorization-outbox",
-      "head": "610cc4a1b7d6720634312b57d7d1aad5fe1c8df8",
-      "tree": "95d3543368d864a6ef0213802e081fa7585418d8",
+      "implementation_commit": "6544f02a40a8135710649fbfff7ce73a7af5f0a3",
+      "implementation_parent": "8c87368a80f70b18765a5647e3fceef41405ad4a",
+      "implementation_tree": "d6d6a18f87f0ad434b21a7860a3c339ff9317a4d",
       "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
-      "commits": [
-        "610cc4a1b7d6720634312b57d7d1aad5fe1c8df8"
+      "consolidated_prs": [
+        124,
+        125
       ],
-      "pr": "https://github.com/Aqr-K/MoviePilot/pull/124",
       "verification": {
-        "tree": "95d3543368d864a6ef0213802e081fa7585418d8",
-        "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
-        "full_suite_tree": "95d92a8240c7bfcd47e998daf7b9728385b2e3e9",
-        "passed": 23458,
-        "skipped": 22,
-        "focused": 131,
-        "partition": {
-          "all_files": 1260,
-          "business_files": 1253,
-          "architecture_files": [
-            "tests/contracts/architecture/test_architecture_adapter_imports.py",
-            "tests/contracts/architecture/test_architecture_baseline_cli.py",
-            "tests/contracts/architecture/test_architecture_contract_baseline.py",
-            "tests/contracts/architecture/test_architecture_dependencies.py",
-            "tests/contracts/architecture/test_architecture_egress.py",
-            "tests/contracts/architecture/test_architecture_event_facts.py",
-            "tests/contracts/architecture/test_architecture_event_policy.py"
-          ],
-          "disjoint_complete_union": true
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "26869f4344b85ffb79f8b00fddedf1c3b38fae95",
+          "source_tree": "d6d6a18f87f0ad434b21a7860a3c339ff9317a4d",
+          "product_validation_revision": "610cc4a1b7d6720634312b57d7d1aad5fe1c8df8",
+          "passed": 23458,
+          "skipped": 22,
+          "documentation_contract_passed": 18
         },
-        "static": "10/10; changed/app pylint10.00; identical terminal test reused final stage25 supplement",
-        "startup": "3 repeat medians1888.57/1939.451/1896.31ms below unchanged3000ms",
-        "coverage": "ratchet passed 82.70%; full raw coverage plus90-test media classification supplemental; baseline unchanged",
-        "initial_failure": {
-          "log": "backend-pr-series-stage26-checks/full-3.log",
-          "test": "test_two_hundred_rules_with_six_conditions_evaluate_under_five_ms_p95",
-          "observed_ms": 30.665,
-          "budget_ms": 5,
-          "instrumentation": "coverage full sharded run",
-          "resolution": "same entire 3/8 shard without instrumentation passed 3114/1; media classification file under coverage passed90/0; no source, assertions or budget changes"
-        },
-        "post_full_product_changes": false,
-        "post_full_changes": [
-          "docs/channel-refactor/authorization-outbox.md",
-          "docs/channel-refactor/extension-boundaries.md"
-        ]
+        "product_changes": false,
+        "documentation_follows": true
       }
     }
   ],
-  "real_wechat_validation": "skipped by user instruction; isolated configuration and mocked protocols only",
-  "manual_runtime_updated": false,
-  "force_push": false,
-  "merged_by_this_delivery": false,
   "split_integrity": {
     "production_bytes_equal_prepared_integration": true,
     "relocated_regressions": 188,
     "unique_owners": true,
     "assertions_preserved_after_fixture_rename": true,
     "fixture_rename": "subscriptions -> browser_devices in 12 browser-device tests; only fixture argument, local reference and parameter docstring differ"
-  }
+  },
+  "consolidation": {
+    "previous_count": 24,
+    "current_count": 14,
+    "code_tests_lock_ci_fixtures_unchanged": true,
+    "original_endpoint_trees_preserved": true,
+    "commit_order_preserved": true,
+    "verification_reuse": "完整源码树一致；只重写提交父子关系，并更新文档与索引。文档合同另行执行。",
+    "obsolete_prs": [
+      102,
+      104,
+      107,
+      111,
+      114,
+      117,
+      119,
+      120,
+      121,
+      124
+    ],
+    "obsolete_branch_cleanup": "新序列核验后关闭被吸收 PR 并删除对应 fork 分支；另清理已关闭旧大 PR 和已合入独立 PR 的过期分支。私有备份不推送到远端。"
+  },
+  "real_wechat_validation": "按用户指令跳过真实企业微信；只使用隔离配置与模拟外部协议",
+  "manual_runtime_updated": false,
+  "force_push": {
+    "authorized": true,
+    "scope": "仅本次任务的 fork 主题分支，使用精确旧 SHA 的 force-with-lease；不重写官方或默认分支"
+  },
+  "merged_by_this_delivery": false
 }
