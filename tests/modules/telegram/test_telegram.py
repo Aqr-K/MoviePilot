@@ -16,6 +16,7 @@ from app.modules.telegram.botapi import TelegramApiError, TelegramNetworkError
 from app.modules.telegram.module import TelegramModule
 from app.modules.telegram.telegram import Telegram
 from app.schemas.message import Message
+from app.schemas.system import NotificationConf
 from app.schemas.types import MediaType, NotificationChannel
 
 
@@ -89,7 +90,7 @@ async def test_agent_final_edit_waits_during_telegram_edit_interval(
     handler._original_message_id = "question"
     module = TelegramModule()
     module._channel = NotificationChannel.Telegram
-    monkeypatch.setattr(module, "get_configs", lambda: {"bot": SimpleNamespace(name="bot")})
+    monkeypatch.setattr(module, "get_configs", lambda: {"bot": NotificationConf(name='bot', type='telegram')})
     monkeypatch.setattr(module, "get_instance", lambda _name: telegram)
     monkeypatch.setattr(module, "check_message", lambda *_args: True)
     monkeypatch.setattr(module, "get_notification_targets", lambda _message: None)
@@ -267,7 +268,7 @@ def test_telegram_parser_preserves_reply_to_message_id():
     Telegram ForceReply 回复应保留来源消息和被回复消息的 message_id。
     """
     module = TelegramModule()
-    client_config = SimpleNamespace(name="telegram-test", config={})
+    client_config = NotificationConf(name='telegram-test', config={}, type='telegram')
     client = SimpleNamespace(bot_username="mp_bot")
     payload = {
         "update_id": 1,
@@ -662,7 +663,7 @@ def test_notification_failure_is_not_acknowledged_by_outbox(telegram, monkeypatc
     # 只移除测试中的真实退避等待，保留完整重试与模块派发路径。
     monkeypatch.setattr("app.runtime.execution.time.sleep", lambda _seconds: None)
     module = TelegramModule()
-    monkeypatch.setattr(module, "get_configs", lambda: {"tg": SimpleNamespace(name="tg")})
+    monkeypatch.setattr(module, "get_configs", lambda: {"tg": NotificationConf(name='tg', type='telegram')})
     monkeypatch.setattr(module, "check_message", lambda *_args: True)
     monkeypatch.setattr(module, "get_instance", lambda _name: telegram)
     store = MagicMock()
@@ -794,7 +795,7 @@ def test_telegram_module_passes_parse_mode_to_client():
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "check_message", return_value=True
     ), patch.object(
@@ -824,7 +825,7 @@ def test_telegram_module_passes_rich_message_to_client():
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "check_message", return_value=True
     ), patch.object(
@@ -854,7 +855,7 @@ def test_telegram_module_passes_streaming_rich_message_to_edit_client():
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "get_instance", return_value=client
     ):
@@ -881,7 +882,7 @@ def test_telegram_module_plain_post_message_keeps_chat_without_editing_source_me
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "check_message", return_value=True
     ), patch.object(
@@ -915,7 +916,7 @@ def test_telegram_module_passes_force_reply_to_client():
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "check_message", return_value=True
     ), patch.object(
@@ -952,7 +953,7 @@ def test_telegram_module_force_reply_sends_new_prompt_message():
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "check_message", return_value=True
     ), patch.object(
@@ -993,7 +994,7 @@ def test_telegram_module_direct_force_reply_sends_new_prompt_message():
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "check_message", return_value=True
     ), patch.object(
@@ -1036,7 +1037,7 @@ def test_telegram_module_direct_buttons_keep_new_message_behavior():
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "check_message", return_value=True
     ), patch.object(
@@ -1077,7 +1078,7 @@ def test_telegram_module_plain_direct_message_keeps_userid_target():
     with patch.object(
         module,
         "get_configs",
-        return_value={"telegram-test": SimpleNamespace(name="telegram-test")},
+        return_value={"telegram-test": NotificationConf(name='telegram-test', type='telegram')},
     ), patch.object(
         module, "check_message", return_value=True
     ), patch.object(

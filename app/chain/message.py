@@ -26,7 +26,12 @@ from app.application.agent import (
     transcribe_audio,
 )
 from app.application.messaging import router as interaction_router
-from app.application.messaging.interaction import InteractionContext, InteractionDispatch
+from app.application.messaging.interaction import (
+    InteractionContext,
+    InteractionDispatch,
+    interaction_key,
+    scoped_interaction,
+)
 from app.application.messaging.interaction.agent import (
     agent_interaction_manager,
     is_agent_learning_command,
@@ -311,6 +316,7 @@ class MessageChain(ChainBase):
             callback_data=callback_data,
         )
 
+    @scoped_interaction
     def handle_message(
             self,
             channel: NotificationChannel,
@@ -440,7 +446,7 @@ class MessageChain(ChainBase):
                 return
 
             is_agent_message = self._is_agent_message(
-                userid=userid,
+                context=interaction_context,
                 text=text,
                 callback_data=normalized_callback,
                 images=images,
@@ -671,7 +677,7 @@ class MessageChain(ChainBase):
             )
 
         media_attempted = False
-        if media_interaction_manager.get_by_user(context.user_id) is not None:
+        if media_interaction_manager.get_by_user(context.user_id, context.channel, context.source, context.original_chat_id) is not None:
             media_attempted = True
             if self._dispatch_member_media_text(context, text, principal):
                 return False
@@ -1084,12 +1090,12 @@ class MessageChain(ChainBase):
 
     def _is_agent_message(
             self,
-            userid: Union[str, int],
             text: str,
             callback_data: Optional[str] = None,
             images: Optional[List[IncomingMessage.MessageImage]] = None,
             files: Optional[List[IncomingMessage.MessageAttachment]] = None,
             has_audio_input: bool = False,
+            context: Optional[InteractionContext] = None,
     ) -> bool:
         """
         判断本条消息是否会进入 Agent worker，由 Agent worker 管理 typing 生命周期。
@@ -1110,7 +1116,7 @@ class MessageChain(ChainBase):
                 )
         ):
             return False
-        if self._interaction_router().has_pending(userid):
+        if context is not None and self._interaction_router().has_pending(context):
             return False
         return True
 
@@ -1180,35 +1186,46 @@ class MessageChain(ChainBase):
         session_routes = [
             interaction_router.SessionRoute(
                 name="sites",
-                get_pending=site_interaction_manager.get_by_user,
+                get_pending=lambda context: site_interaction_manager.get_by_user(
+                    context.user_id, context.channel, context.source, context.original_chat_id,
+                ),
                 handle_text=interaction_router.adapt_session_text_handler(
                     lambda **kw: SiteChain().handle_text_interaction(**kw)
                 ),
             ),
             interaction_router.SessionRoute(
                 name="subscribes",
-                get_pending=subscribe_interaction_manager.get_by_user,
+                get_pending=lambda context: subscribe_interaction_manager.get_by_user(
+                    context.user_id, context.channel, context.source, context.original_chat_id,
+                ),
                 handle_text=interaction_router.adapt_session_text_handler(
                     lambda **kw: SubscribeChain().handle_text_interaction(**kw)
                 ),
             ),
             interaction_router.SessionRoute(
                 name="skills",
-                get_pending=skill_interaction_manager.get_by_user,
+                get_pending=lambda context: skill_interaction_manager.get_by_user(
+                    context.user_id, context.channel, context.source, context.original_chat_id,
+                ),
                 handle_text=interaction_router.adapt_session_text_handler(
                     lambda **kw: SkillInteractionHandler(messenger=self).handle_text_interaction(**kw)
                 ),
             ),
             interaction_router.SessionRoute(
                 name="media",
-                get_pending=media_interaction_manager.get_by_user,
+                get_pending=lambda context: media_interaction_manager.get_by_user(
+                    context.user_id, context.channel, context.source, context.original_chat_id,
+                ),
                 handle_text=interaction_router.adapt_session_text_handler(
-                    lambda **kw: _MediaInteractionChain().handle_text_interaction(**kw)
+                    lambda **kw: _MediaInteractionChain().handle_text_interaction(**kw),
+                    include_reply_context=True,
                 ),
             ),
             interaction_router.SessionRoute(
                 name="update",
-                get_pending=update_interaction_manager.get_by_user,
+                get_pending=lambda context: update_interaction_manager.get_by_user(
+                    context.user_id, context.channel, context.source, context.original_chat_id,
+                ),
                 handle_text=interaction_router.adapt_session_text_handler(lambda **kw: SystemChain().handle_update_text_interaction(**kw)),
             ),
         ]
@@ -1350,11 +1367,24 @@ class MessageChain(ChainBase):
         if not callback:
             return False
 
+        authorization = get_channel_authorization()
+        if authorization is not None and context.channel not in {NotificationChannel.Web, NotificationChannel.WebAgent}:
+            try:
+                authorization.resolve(context.channel.value, context.source or "", str(context.user_id))
+            except (PermissionError, ValueError):
+                self.post_message(Message(
+                    channel=context.channel, source=context.source, userid=context.user_id,
+                    original_chat_id=context.original_chat_id, title="当前渠道权限已变化，请重新发起操作",
+                    save_history=False,
+                ))
+                return False
+
         request_id, option_index = callback
         resolved = agent_interaction_manager.resolve(
             request_id=request_id,
             option_index=option_index,
             user_id=str(context.user_id),
+            address=interaction_key(context.user_id, context.channel, context.source, context.original_chat_id),
         )
         if not resolved:
             self.post_message(
@@ -1364,7 +1394,7 @@ class MessageChain(ChainBase):
                     userid=context.user_id,
                     username=context.username,
                     title="该选择已失效，请重新发起选择",
-                    save_history=False,
+                    save_history=False, original_chat_id=context.original_chat_id,
                 )
             )
             return False
@@ -1380,7 +1410,9 @@ class MessageChain(ChainBase):
             prompt=request.prompt,
             selected_label=option.label,
         )
-        self._bind_session_id(self._session_user_key(context.user_id, context.channel, context.source), request.session_id)
+        self._bind_session_id(self._session_user_key(
+            context.user_id, context.channel, context.source,
+        ), request.session_id)
         return self._handle_ai_message(
             text=selected_text,
             channel=context.channel,
@@ -1389,6 +1421,7 @@ class MessageChain(ChainBase):
             username=context.username or str(context.user_id),
             is_channel_admin=context.is_channel_admin,
             session_id=request.session_id,
+            original_chat_id=context.original_chat_id,
         )
 
     def _update_interaction_message_feedback(
