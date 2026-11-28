@@ -1,0 +1,465 @@
+{
+  "schema_version": 2,
+  "upstream_base": "da978d051c6eb5aec8863d96f5b2f77e8731532c",
+  "series_base": {
+    "branch": "refactor/channel-series-base",
+    "head": "6689c8adddaf582938deaa1065d86f1843836f49",
+    "purpose": "只聚合独立前置，供 fork 堆叠审阅；不作为一个大 PR 移交官方"
+  },
+  "code_revision": "6544f02a40a8135710649fbfff7ce73a7af5f0a3",
+  "code_tree": "d6d6a18f87f0ad434b21a7860a3c339ff9317a4d",
+  "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
+  "documentation_pr": "https://github.com/Aqr-K/MoviePilot/pull/125",
+  "documentation_branch": "docs/channel-series-review-index",
+  "frontend": {
+    "revision": "148c6e7d01c794b8728e3bdeee8267e1719ab49e",
+    "pr": "https://github.com/jxxghp/MoviePilot-Frontend/pull/976",
+    "changed_in_backend_split": false
+  },
+  "independent_official_prs": [
+    {
+      "number": 7638,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7638",
+      "state": "closed",
+      "merged": true,
+      "head": "b685e3fae5855aeed0ef69f02a272ed045b54944",
+      "branch": "fix/channel-series-postgresql",
+      "base": "da978d051c6eb5aec8863d96f5b2f77e8731532c"
+    },
+    {
+      "number": 7639,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7639",
+      "state": "open",
+      "merged": false,
+      "head": "0a26bd81144228faf04b7116f599f614b8ab05d7",
+      "branch": "feat/channel-series-contracts",
+      "base": "da978d051c6eb5aec8863d96f5b2f77e8731532c"
+    },
+    {
+      "number": 7640,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7640",
+      "state": "closed",
+      "merged": true,
+      "head": "08e9151ab8d858e9ab72762c5ed878570d65c8f6",
+      "branch": "fix/channel-series-transport-identifiers",
+      "base": "da978d051c6eb5aec8863d96f5b2f77e8731532c"
+    },
+    {
+      "number": 7642,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7642",
+      "state": "closed",
+      "merged": true,
+      "head": "094258f41cb596a12d73714533772fee9141fe56",
+      "branch": "test/channel-series-transfer-isolation",
+      "base": "74ab99bb0f69a280eaa0b5a778de4fc334df9652"
+    },
+    {
+      "number": 7643,
+      "url": "https://github.com/jxxghp/MoviePilot/pull/7643",
+      "state": "closed",
+      "merged": true,
+      "head": "aa01a2ec86c1fe6c9dffee4cda808d25ef4b4380",
+      "branch": "test/channel-series-terminal-output",
+      "base": "74ab99bb0f69a280eaa0b5a778de4fc334df9652"
+    }
+  ],
+  "dependency_units": [
+    {
+      "unit": 1,
+      "scope": "平台扩展契约与内置身份事实",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/103",
+      "branch": "refactor/channel-series-platform-facts",
+      "base_branch": "refactor/channel-series-base",
+      "implementation_commit": "76339baadda56f660debcc9cc7e35b46ae651bb4",
+      "implementation_parent": "6689c8adddaf582938deaa1065d86f1843836f49",
+      "implementation_tree": "6e45d84c97ea385d63d0518933db883f1290382c",
+      "app_tree": "8594a1aef6621021fe0ef35613e2d721327f3385",
+      "consolidated_prs": [
+        102,
+        103
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "7a43aa3aa1adfacffc1bf767f646454d4e30b9e6",
+          "source_tree": "6e45d84c97ea385d63d0518933db883f1290382c",
+          "passed": 22741,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 2,
+      "scope": "连接资源、规则配置与固定离线升级",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/105",
+      "branch": "feat/channel-series-offline-migration",
+      "base_branch": "refactor/channel-series-platform-facts",
+      "implementation_commit": "63ce0b7ef7fbec59c6a874f8c927c7efd733715a",
+      "implementation_parent": "76339baadda56f660debcc9cc7e35b46ae651bb4",
+      "implementation_tree": "22c88159aa3d6e1e243b0c190a3c1487b3b35e88",
+      "app_tree": "ab23b1a72c3d132613a8875d2e873d65df211a2e",
+      "consolidated_prs": [
+        104,
+        105
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "46632db1daed64cf5651e50325d3a19a86be5265",
+          "source_tree": "22c88159aa3d6e1e243b0c190a3c1487b3b35e88",
+          "passed": 22831,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 3,
+      "scope": "规范授权服务与仓储",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/106",
+      "branch": "refactor/channel-series-authorization",
+      "base_branch": "feat/channel-series-offline-migration",
+      "implementation_commit": "fc25e1d74cf36c05c99d93ae384c0c528dad6854",
+      "implementation_parent": "63ce0b7ef7fbec59c6a874f8c927c7efd733715a",
+      "implementation_tree": "2a2912e4faac698d73c7993457a925b500c5f352",
+      "app_tree": "3523b608e0efa6b5dd4b225e08f2964435533ba2",
+      "consolidated_prs": [
+        106
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "10566fb89957768c0295eb8127ed94aaef5bb0c3",
+          "source_tree": "2a2912e4faac698d73c7993457a925b500c5f352",
+          "passed": 22885,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 4,
+      "scope": "订阅及下载业务归属与提交前复核",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/108",
+      "branch": "feat/channel-series-download-ownership",
+      "base_branch": "refactor/channel-series-authorization",
+      "implementation_commit": "eadd0a21ebefcf673d1685864ddd099fbe72d486",
+      "implementation_parent": "fc25e1d74cf36c05c99d93ae384c0c528dad6854",
+      "implementation_tree": "f234a33ed7fea7464ece1e3b0c586f6fd7ead886",
+      "app_tree": "d72a56ad6c44bf546ff64e8946a06f1854e33e2a",
+      "consolidated_prs": [
+        107,
+        108
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "40a3ab42247c3c4e55806df812242460f61e037b",
+          "source_tree": "f234a33ed7fea7464ece1e3b0c586f6fd7ead886",
+          "passed": 22909,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 5,
+      "scope": "浏览器设备归属持久化",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/109",
+      "branch": "feat/channel-series-webpush-persistence",
+      "base_branch": "feat/channel-series-download-ownership",
+      "implementation_commit": "5c82653192a542e81c44fbf7b9905e05b505bd51",
+      "implementation_parent": "eadd0a21ebefcf673d1685864ddd099fbe72d486",
+      "implementation_tree": "1dec9cc787a69ebe4bbdbd1e8ee2d2719796b3bc",
+      "app_tree": "34d7f5c701a512cf195850ea4fb18ef4bfb597a4",
+      "consolidated_prs": [
+        109
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "49f0c87139295bbb8230505157cb55ce41a9c2fa",
+          "source_tree": "1dec9cc787a69ebe4bbdbd1e8ee2d2719796b3bc",
+          "passed": 22917,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 6,
+      "scope": "冻结投递计划与分段恢复",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/110",
+      "branch": "refactor/channel-series-delivery-progress",
+      "base_branch": "feat/channel-series-webpush-persistence",
+      "implementation_commit": "2279b82561a5b53e155f171e1a34ca9226a61cd8",
+      "implementation_parent": "5c82653192a542e81c44fbf7b9905e05b505bd51",
+      "implementation_tree": "68e96c42b062d0b08d629bbc8cc7ad6e29852606",
+      "app_tree": "a33c598c0df24a6caccb3f11f35accd0267140b1",
+      "consolidated_prs": [
+        110
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "f61637e0df26a30e9880c8097dbd8d015f5013d4",
+          "source_tree": "68e96c42b062d0b08d629bbc8cc7ad6e29852606",
+          "passed": 22949,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 7,
+      "scope": "可信 SDK 入站与交互作用域",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/112",
+      "branch": "refactor/channel-series-host-ingress",
+      "base_branch": "refactor/channel-series-delivery-progress",
+      "implementation_commit": "42d40a328f3d9153c7eed83280b20da1abaaab90",
+      "implementation_parent": "2279b82561a5b53e155f171e1a34ca9226a61cd8",
+      "implementation_tree": "acb68007619d1a8cbbb5bf2de82db9ddd199ff31",
+      "app_tree": "09f580f50d3695b511a69da1bc3c8d610239d6fe",
+      "consolidated_prs": [
+        111,
+        112
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "c5cb0d0b1f34e0b6b5e3408dbc5829d08c0d77ee",
+          "source_tree": "acb68007619d1a8cbbb5bf2de82db9ddd199ff31",
+          "passed": 22989,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 8,
+      "scope": "浏览器投递及设备 API 装配",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/113",
+      "branch": "feat/channel-series-webpush-delivery",
+      "base_branch": "refactor/channel-series-host-ingress",
+      "implementation_commit": "f9dddb80033b0fdf0c5b0ad4cafc1e1fb328bd5e",
+      "implementation_parent": "42d40a328f3d9153c7eed83280b20da1abaaab90",
+      "implementation_tree": "411aa8d3d8861f051836b88e5f5d76b7d2a575b5",
+      "app_tree": "5d5b87178ed375c77fe63961de6dda704b1e9669",
+      "consolidated_prs": [
+        113
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "5371f332c7e7ec8d6c4dacaae75d5072dceb23b9",
+          "source_tree": "411aa8d3d8861f051836b88e5f5d76b7d2a575b5",
+          "passed": 23014,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 9,
+      "scope": "运行装配、资源入口与业务 API",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/115",
+      "branch": "feat/channel-series-owned-business-api",
+      "base_branch": "feat/channel-series-webpush-delivery",
+      "implementation_commit": "3c03d1909934069f9b571c8c783a64cf913f9b02",
+      "implementation_parent": "f9dddb80033b0fdf0c5b0ad4cafc1e1fb328bd5e",
+      "implementation_tree": "257bfaf3e990c9de74f455f8158402f29be82eef",
+      "app_tree": "3ffdbb64ac142c08fcc0a5d5d0bb40fb28238771",
+      "consolidated_prs": [
+        114,
+        115
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "c27065dd828d4924f940542b6419c07823ceecce",
+          "source_tree": "257bfaf3e990c9de74f455f8158402f29be82eef",
+          "passed": 23059,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 10,
+      "scope": "Telegram 认证接入与分段恢复",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/116",
+      "branch": "refactor/channel-series-telegram",
+      "base_branch": "feat/channel-series-owned-business-api",
+      "implementation_commit": "0e58e9e43e5ae4f44e2634d5572d0dbc89672655",
+      "implementation_parent": "3c03d1909934069f9b571c8c783a64cf913f9b02",
+      "implementation_tree": "90bea0a5883b3fb7d1a749cdecc754d1c93bad5d",
+      "app_tree": "6454ed4bb69966bc98e6f0edb658e2f6e3492ef5",
+      "consolidated_prs": [
+        116
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "19fd27f8673da0368e9102f2b064d3c872226c1f",
+          "source_tree": "90bea0a5883b3fb7d1a749cdecc754d1c93bad5d",
+          "passed": 23091,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 11,
+      "scope": "企业微信应用、机器人及 ClawBot",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/118",
+      "branch": "refactor/channel-series-clawbot",
+      "base_branch": "refactor/channel-series-telegram",
+      "implementation_commit": "5345e92b98b0c589a03c4de5dcd03e09998f77aa",
+      "implementation_parent": "0e58e9e43e5ae4f44e2634d5572d0dbc89672655",
+      "implementation_tree": "4e4ea66c807f0ebb63b80fd0dc0b0e8ba5c4af0a",
+      "app_tree": "6d2f1cd8bd645d2a8d9c31ae935c939496d4165a",
+      "consolidated_prs": [
+        117,
+        118
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "caf943f2ffcfdabc99e5682d4d56d89538275d88",
+          "source_tree": "4e4ea66c807f0ebb63b80fd0dc0b0e8ba5c4af0a",
+          "passed": 23129,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 12,
+      "scope": "其他内置平台的入站与投递实现",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/122",
+      "branch": "refactor/channel-series-callback-delivery",
+      "base_branch": "refactor/channel-series-clawbot",
+      "implementation_commit": "4fe7d03187c1be3cc047e9d4d605785b0eec5b2e",
+      "implementation_parent": "5345e92b98b0c589a03c4de5dcd03e09998f77aa",
+      "implementation_tree": "61e2e7964d4d7fabfeca9b4f34edd75891072b91",
+      "app_tree": "fd2823f32e3e4b538db3becc12cb7cea6d3998be",
+      "consolidated_prs": [
+        119,
+        120,
+        121,
+        122
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "b4a0a0f6c4d5bd95cb8fbe23f79828b7ad5b24b3",
+          "source_tree": "61e2e7964d4d7fabfeca9b4f34edd75891072b91",
+          "passed": 23169,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 13,
+      "scope": "审批回执、持久投递与安全回归",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/123",
+      "branch": "refactor/channel-series-authorization-outbox",
+      "base_branch": "refactor/channel-series-callback-delivery",
+      "implementation_commit": "8c87368a80f70b18765a5647e3fceef41405ad4a",
+      "implementation_parent": "4fe7d03187c1be3cc047e9d4d605785b0eec5b2e",
+      "implementation_tree": "9c06694f239802ecbbceddfd113bcf919d4b8243",
+      "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
+      "consolidated_prs": [
+        123
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "22a761d41197f4ed097aed79d82da10b713b5f9a",
+          "source_tree": "9c06694f239802ecbbceddfd113bcf919d4b8243",
+          "passed": 23346,
+          "skipped": 22
+        },
+        "product_changes": false,
+        "documentation_follows": false
+      }
+    },
+    {
+      "unit": 14,
+      "scope": "SDK 扩展验收、架构约束与最终文档",
+      "pr": "https://github.com/Aqr-K/MoviePilot/pull/125",
+      "branch": "docs/channel-series-review-index",
+      "base_branch": "refactor/channel-series-authorization-outbox",
+      "implementation_commit": "6544f02a40a8135710649fbfff7ce73a7af5f0a3",
+      "implementation_parent": "8c87368a80f70b18765a5647e3fceef41405ad4a",
+      "implementation_tree": "d6d6a18f87f0ad434b21a7860a3c339ff9317a4d",
+      "app_tree": "6f239ace264c5e555501ef2912987b2a813d0f3b",
+      "consolidated_prs": [
+        124,
+        125
+      ],
+      "verification": {
+        "mode": "identical full Git tree, preserving original source order; reuse exact-tree evidence",
+        "original_endpoint": {
+          "source_endpoint": "26869f4344b85ffb79f8b00fddedf1c3b38fae95",
+          "source_tree": "d6d6a18f87f0ad434b21a7860a3c339ff9317a4d",
+          "product_validation_revision": "610cc4a1b7d6720634312b57d7d1aad5fe1c8df8",
+          "passed": 23458,
+          "skipped": 22,
+          "documentation_contract_passed": 18
+        },
+        "product_changes": false,
+        "documentation_follows": true
+      }
+    }
+  ],
+  "split_integrity": {
+    "production_bytes_equal_prepared_integration": true,
+    "relocated_regressions": 188,
+    "unique_owners": true,
+    "assertions_preserved_after_fixture_rename": true,
+    "fixture_rename": "subscriptions -> browser_devices in 12 browser-device tests; only fixture argument, local reference and parameter docstring differ"
+  },
+  "consolidation": {
+    "previous_count": 24,
+    "current_count": 14,
+    "code_tests_lock_ci_fixtures_unchanged": true,
+    "original_endpoint_trees_preserved": true,
+    "commit_order_preserved": true,
+    "verification_reuse": "完整源码树一致；只重写提交父子关系，并更新文档与索引。文档合同另行执行。",
+    "obsolete_prs": [
+      102,
+      104,
+      107,
+      111,
+      114,
+      117,
+      119,
+      120,
+      121,
+      124
+    ],
+    "obsolete_branch_cleanup": "新序列核验后关闭被吸收 PR 并删除对应 fork 分支；另清理已关闭旧大 PR 和已合入独立 PR 的过期分支。私有备份不推送到远端。"
+  },
+  "real_wechat_validation": "按用户指令跳过真实企业微信；只使用隔离配置与模拟外部协议",
+  "manual_runtime_updated": false,
+  "force_push": {
+    "authorized": true,
+    "scope": "仅本次任务的 fork 主题分支，使用精确旧 SHA 的 force-with-lease；不重写官方或默认分支"
+  },
+  "merged_by_this_delivery": false
+}
